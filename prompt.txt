@@ -1,0 +1,502 @@
+You are a senior full-stack developer helping me build a Goal Setting & Performance Tracking Portal for a hackathon. I will describe the complete requirements and you must help me build this step by step.
+
+---
+
+## PROJECT OVERVIEW
+
+Build a web-based Goal Setting & Tracking Portal for organizations. It manages the full lifecycle of employee goals — creation, manager approval, quarterly check-ins, and reporting.
+
+---
+
+## TECH STACK (strictly follow this)
+
+- Frontend: Next.js 14 (App Router), Tailwind CSS, shadcn/ui
+- Backend: FastAPI (Python)
+- ORM: SQLAlchemy (async) with Alembic for migrations
+- Database: PostgreSQL (local via Docker, production on Neon DB)
+- Auth: JWT-based authentication (python-jose + passlib)
+- Background Jobs: APScheduler
+- Export: Pandas for CSV/Excel generation
+- Deployment: Vercel (frontend), Railway or Render (backend)
+
+---
+
+## USER ROLES
+
+There are exactly 3 roles. Every API route and UI screen must be protected by role.
+
+1. EMPLOYEE
+   - Can create, edit, and submit goal sheets (only before approval)
+   - Can log quarterly achievement updates
+   - Can view their own locked goals after approval
+   - Cannot edit goals after manager approval
+
+2. MANAGER (L1)
+   - Has a team dashboard showing all direct reports
+   - Can review submitted goals, edit targets/weightages inline before approving
+   - Can approve or return goals for rework
+   - Can conduct quarterly check-ins and add structured comments
+   - Can push shared goals to multiple employees
+
+3. ADMIN / HR
+   - Can configure goal-setting cycles (open/close dates)
+   - Can manage org hierarchy (who reports to whom)
+   - Can unlock goals after the lock date (exception handling)
+   - Has access to audit logs of all post-lock changes
+   - Can view completion rates across the organization
+
+---
+
+## DATABASE SCHEMA (build exactly this)
+
+Tables needed:
+
+users — id, name, email, hashed_password, role (employee/manager/admin), manager_id (self-referencing FK), department, created_at
+
+goal_cycles — id, name, phase (goal_setting/q1/q2/q3/q4), opens_at, closes_at, is_active
+
+goal_sheets — id, employee_id (FK users), cycle_id (FK goal_cycles), status (draft/submitted/approved/returned), submitted_at, approved_at, approved_by (FK users)
+
+goals — id, goal_sheet_id (FK), thrust_area, title, description, uom_type (numeric_min/numeric_max/timeline/zero), target_value, target_date, weightage, is_shared, shared_by (FK users nullable), is_locked, created_at
+
+achievements — id, goal_id (FK), cycle_phase (q1/q2/q3/q4), actual_value, actual_date, status (not_started/on_track/completed), progress_score (computed), updated_at
+
+checkin_comments — id, goal_sheet_id (FK), manager_id (FK users), phase (q1/q2/q3/q4), comment, created_at
+
+audit_logs — id, goal_id (FK), changed_by (FK users), change_type, old_value (JSON), new_value (JSON), changed_at
+
+---
+
+## CORE BUSINESS LOGIC (never break these rules)
+
+These are strict validation rules that must be enforced at BOTH the API level (Pydantic validators) and the frontend level (form validation):
+
+1. Total weightage across all goals in a goal sheet MUST equal exactly 100%
+2. Minimum weightage per individual goal is 10%
+3. Maximum number of goals per employee per cycle is 8
+4. Goals become LOCKED (no edits allowed) once the manager approves the goal sheet
+5. After lock, any change must be made by Admin only and must be recorded in audit_logs
+6. Shared goals: recipients can only change weightage — title and target are read-only
+7. Achievement updates by the primary owner of a shared goal must sync to all linked employees automatically
+8. Quarterly check-in windows are time-enforced — employees can only log achievements when the cycle phase is active
+
+---
+
+## PROGRESS SCORE FORMULAS (implement exactly)
+
+When saving an achievement record, auto-compute progress_score based on uom_type:
+
+- numeric_min (higher is better, e.g. Sales Revenue): progress_score = actual_value / target_value
+- numeric_max (lower is better, e.g. TAT, Cost): progress_score = target_value / actual_value
+- timeline (date-based): progress_score = 1.0 if completed on or before target_date, else partial based on delay
+- zero (zero = success, e.g. Safety incidents): progress_score = 1.0 if actual_value == 0, else 0.0
+
+Cap progress_score at 1.0 (100%) maximum. Store as a float between 0 and 1.
+
+---
+
+## API ROUTES TO BUILD
+
+Auth:
+POST /auth/login — returns JWT token
+POST /auth/refresh — refresh token
+GET /auth/me — returns current user info
+
+Users (Admin only):
+GET /users — list all users
+POST /users — create user
+PATCH /users/{id} — update user / reassign manager
+GET /users/{id}/direct-reports — get team members
+
+Goal Cycles (Admin only):
+GET /cycles — list all cycles
+POST /cycles — create cycle
+PATCH /cycles/{id} — update cycle dates
+POST /cycles/{id}/activate — set as active cycle
+
+Goal Sheets (Employee):
+POST /goal-sheets — create new goal sheet for active cycle
+GET /goal-sheets/mine — get my goal sheets
+POST /goal-sheets/{id}/submit — submit for manager approval
+POST /goal-sheets/{id}/goals — add a goal to sheet
+PATCH /goal-sheets/{id}/goals/{goal_id} — edit a goal (pre-approval only)
+DELETE /goal-sheets/{id}/goals/{goal_id} — delete a goal (pre-approval only)
+
+Manager Approval:
+GET /manager/team-goals — get all submitted goal sheets from direct reports
+PATCH /manager/goal-sheets/{id}/goals/{goal_id} — inline edit during review
+POST /manager/goal-sheets/{id}/approve — approve and lock
+POST /manager/goal-sheets/{id}/return — return for rework with comment
+
+Shared Goals:
+POST /admin/shared-goals — push a goal to multiple employees
+PATCH /shared-goals/{id}/weightage — employee adjusts their weightage only
+
+Achievements:
+POST /achievements — log achievement for a goal in current phase
+PATCH /achievements/{id} — update achievement
+GET /goal-sheets/{id}/achievements — view all achievements for a sheet
+
+Check-ins:
+POST /checkins — manager posts a check-in comment
+GET /checkins/{goal_sheet_id} — view all check-ins for a goal sheet
+
+Reports (Manager + Admin):
+GET /reports/achievement — full achievement report, supports CSV/Excel export
+GET /reports/completion — who has and hasn't completed check-ins
+GET /reports/audit-log — full audit trail (Admin only)
+
+---
+
+## FRONTEND PAGES TO BUILD
+
+/login — Single login page, redirects to role-specific dashboard after JWT login
+
+Employee pages:
+/dashboard — shows current cycle, goal sheet status, progress summary
+/goals/create — goal creation form with live weightage validation (running total shown)
+/goals/{id} — view goal sheet (locked view after approval)
+/achievements — quarterly update form, only active when cycle phase is open
+
+Manager pages:
+/manager/dashboard — team overview, pending approvals count, check-in completion
+/manager/approvals — list of submitted goal sheets awaiting review
+/manager/approvals/{id} — inline review screen with edit/approve/return actions
+/manager/checkins — check-in interface, view planned vs actual per team member
+
+Admin pages:
+/admin/dashboard — org-wide completion rates, cycle status
+/admin/cycles — create and manage goal cycles
+/admin/users — manage users, assign managers, set roles
+/admin/shared-goals — push shared KPIs to departments
+/admin/reports — achievement report + CSV export
+/admin/audit-log — full audit trail table
+
+---
+
+## UI/UX RULES
+
+- Use shadcn/ui components throughout (Table, Dialog, Form, Badge, Card, Tabs)
+- Show a live weightage counter on the goal creation form (e.g. "65% / 100% allocated")
+- Locked goals must be visually distinct — use a lock icon and grey out edit controls
+- Returned goal sheets must show the manager's return comment prominently
+- Progress scores should be shown as a percentage with a colored progress bar (green >80%, yellow 50-80%, red <50%)
+- All forms must show inline validation errors, not just toast notifications
+- Role-based navigation — employees must never see manager or admin routes
+
+---
+
+## FOLDER STRUCTURE TO FOLLOW
+
+Backend (FastAPI):
+/backend
+  /app
+    /api
+      /routes (auth.py, users.py, goals.py, achievements.py, checkins.py, reports.py)
+    /models (SQLAlchemy models)
+    /schemas (Pydantic schemas)
+    /services (business logic layer, separate from routes)
+    /core (config.py, security.py, database.py)
+    /tasks (APScheduler jobs for cycle window enforcement)
+  main.py
+  alembic/ (migrations)
+
+Frontend (Next.js):
+/frontend
+  /app
+    /login
+    /dashboard (employee)
+    /goals
+    /achievements
+    /manager
+    /admin
+  /components
+    /ui (shadcn components)
+    /goals (GoalForm, GoalCard, WeightageCounter)
+    /shared (RoleGuard, PageHeader, DataTable)
+  /lib (api.ts — all fetch calls to FastAPI)
+  /hooks (useAuth.ts, useGoals.ts)
+  /types (TypeScript interfaces matching backend schemas)
+
+---
+
+## IMPORTANT INSTRUCTIONS FOR YOU (Copilot)
+
+1. Always separate business logic into /services — never put it directly in routes
+2. Always write Pydantic validators for the weightage rules — do not just validate on frontend
+3. Use async SQLAlchemy throughout — no sync database calls
+4. Every route must check the user's role before executing — use FastAPI Depends() for this
+5. When a goal is approved, set is_locked=True on all goals in that sheet in the same DB transaction
+6. The audit log insert must happen in the same transaction as the goal update — never separately
+7. For shared goals, use a trigger or service method that fans out achievement updates to all linked goal records
+8. JWT tokens must include user id, role, and manager_id in the payload
+9. All money/percentage values store as Float in DB, display rounded to 2 decimal places in UI
+10. Write one Alembic migration per logical change — do not batch unrelated schema changes
+
+
+Context for this project:
+- FastAPI backend, async SQLAlchemy, PostgreSQL, Alembic
+- 3 roles: employee, manager, admin
+- All business logic goes in /services, never in routes
+- Use async SQLAlchemy throughout, never sync
+- JWT payload contains: user id, role, manager_id
+- Pydantic validators enforce: max 8 goals, min 10% weightage, total must = 100%
+- Goals lock (is_locked=True) on manager approval, same DB transaction
+- Audit log insert must happen in same transaction as any post-lock change
+
+DB Tables: users, goal_cycles, goal_sheets, goals, achievements, checkin_comments, audit_logs
+
+
+Context for this project:
+- FastAPI backend, async SQLAlchemy, PostgreSQL, Alembic
+- 3 roles: employee, manager, admin
+- All business logic goes in /services, never in routes
+- Use async SQLAlchemy throughout, never sync
+- JWT payload contains: user id, role, manager_id
+- Pydantic validators enforce: max 8 goals, min 10% weightage, total must = 100%
+- Goals lock (is_locked=True) on manager approval, same DB transaction
+- Audit log insert must happen in same transaction as any post-lock change
+
+DB Tables: users, goal_cycles, goal_sheets, goals, achievements, checkin_comments, audit_logs
+
+Current Atomberg issues after recent fixes:
+
+ISSUE 1: Returned goal sheets are not editable properly.
+Current behavior:
+- Employee opens returned goal sheet
+- Existing goals are not editable normally
+- System forces adding a new dummy goal with 0 weightage before resubmission works
+
+Expected behavior:
+- Existing goals should load in editable form fields
+- Employee should be able to directly edit title, target, weightage, metric, description
+- Remove/edit existing goals without creating dummy goals
+- Total weightage validation should still enforce exactly 100%
+- Resubmit should work using existing goals only
+
+Fix:
+Create proper edit flow in:
+app/goals/edit/[id]/page.tsx
+
+Requirements:
+- Fetch existing goal sheet using ID
+- Prepopulate all goal fields
+- Maintain original goal IDs while editing
+- Distinguish between:
+  - existing goals being updated
+  - newly added goals
+  - deleted goals
+- On save:
+  - update existing goals
+  - create new goals
+  - delete removed goals
+- After successful edit:
+Call:
+POST /api/goal-sheets/{id}/submit
+
+Do NOT require creating extra placeholder goals.
+
+--------------------------------------------------
+
+ISSUE 2: POST /api/achievements returns:
+422 Unprocessable Entity
+
+Current problem:
+Save Progress button fails.
+
+Need full debugging of payload mismatch.
+
+Check:
+- app/achievements/page.tsx
+- achievements router
+- achievement schema
+- achievement model
+
+Frontend must send EXACT payload shape expected by backend.
+
+Add console logs before API call:
+console.log("Achievement payload", payload)
+
+Also add backend logging in achievements endpoint.
+
+Expected payload:
+{
+  "goal_id": "uuid",
+  "cycle_phase": "Q1",
+  "actual_value": 5,
+  "status": "on_track",
+  "comments": "Progress updated"
+}
+
+Verify:
+- actual_value is numeric not string
+- goal_id exists
+- cycle_phase enum matches backend
+- status enum matches backend schema
+
+Fix all enum mismatches and required field mismatches.
+
+--------------------------------------------------
+
+ISSUE 3: Build error in:
+frontend/app/admin/cycles/page.tsx
+
+Errors:
+- Expression expected
+- Unexpected token
+- Unterminated regexp literal
+
+Root cause is broken JSX structure near lines 280-310.
+
+Inspect conditional rendering carefully.
+There is likely:
+- extra )}
+- missing opening brace
+- unclosed JSX tag
+- malformed fragment
+
+Fix all JSX nesting properly.
+
+Expected:
+- component compiles successfully
+- cycles page renders normally
+- existing cycles display correctly
+
+--------------------------------------------------
+
+ISSUE 4: Reports page crashes:
+Cannot read properties of null (reading 'length')
+
+Fix:
+app/admin/reports/page.tsx
+
+Initialize all arrays safely:
+const [reports, setReports] = useState([])
+
+Replace unsafe checks:
+reports.length
+
+With:
+reports?.length || 0
+
+Apply same fix to:
+- charts
+- analytics
+- summary arrays
+- table data arrays
+
+--------------------------------------------------
+
+ISSUE 5: Audit log page crashes with same null.length issue
+
+Fix:
+app/admin/audit-log/page.tsx
+
+Initialize all list states as:
+useState([])
+
+Replace all:
+logs.length
+
+With:
+logs?.length || 0
+
+Ensure API fallback:
+setLogs(response.data || [])
+
+--------------------------------------------------
+
+ISSUE 6: Authentication/session issue
+
+Current behavior:
+Using browser back button allows switching between admin/manager/employee sessions automatically.
+
+Fix authentication flow:
+- On logout clear:
+  - localStorage
+  - sessionStorage
+  - auth token
+  - cached user data
+- Add route protection validation on every protected page
+- Verify token + role before rendering dashboard
+- Prevent cached dashboard rendering after logout
+
+Expected:
+- Browser back button should not reopen old dashboard
+- Unauthorized users redirected to login
+
+--------------------------------------------------
+
+ISSUE 7: Quarterly achievement tracking page incomplete
+
+Fix:
+app/achievements/page.tsx
+
+Requirements:
+- Fetch employee approved goal sheet
+- Only allow page if status=approved
+- Show:
+  - goal title
+  - target
+  - current quarter label (Q1/Q2/Q3/Q4)
+  - actual value input
+  - status dropdown
+  - comments textarea
+  - save button per goal
+- After saving:
+  - display computed progress percentage
+  - refresh achievement data
+
+If no approved goals:
+Show:
+"Goals must be approved before logging achievements"
+
+Also add dashboard button:
+"Log Progress"
+Link:
+ /achievements
+
+Show button only when employee has approved goals.
+
+--------------------------------------------------
+
+ISSUE 8: Improve global frontend error handling
+
+Current toast shows:
+[object Object]
+
+Fix all pages:
+Replace:
+toast.error(error)
+
+With:
+toast.error(
+  error?.response?.data?.detail ||
+  error?.message ||
+  "Something went wrong"
+)
+
+Apply globally across frontend API calls.
+
+--------------------------------------------------
+
+After all fixes:
+1. Restart backend:
+uvicorn main:app --reload
+
+2. Restart frontend:
+npm run dev
+
+3. Test these scenarios:
+- employee create goals
+- manager approve/return
+- employee edit returned goals
+- employee resubmit
+- employee log quarterly achievements
+- admin reports
+- admin audit logs
+- cycles page
+- logout/login security
+
+
+Check whether the endpoints mentioned in this are correct and then checnage the code accordingly
