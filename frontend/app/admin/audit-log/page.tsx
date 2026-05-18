@@ -97,7 +97,7 @@ export default function AdminAuditLogPage() {
                 <CardContent>
                   {(logs?.length || 0) === 0 ? (
                     <div className="text-center py-8">
-                      <p className="text-gray-500">No audit entries yet. Changes to approved goals will appear here.</p>
+                      <p className="text-gray-500">No audit entries yet. The audit log records all changes made to goals after they have been approved and locked. Make a change to an approved goal to see entries here.</p>
                     </div>
                   ) : (
                     <div className="overflow-x-auto">

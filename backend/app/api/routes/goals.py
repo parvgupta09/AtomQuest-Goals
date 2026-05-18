@@ -8,7 +8,7 @@ from app.core.security import get_current_user, require_role
 from app.services.goal_service import GoalService
 from app.services.manager_service import ManagerService
 from app.schemas.goal_sheet import GoalSheetCreate, GoalSheetResponse
-from app.schemas.goal import GoalCreate, GoalUpdate, GoalResponse
+from app.schemas.goal import GoalCreate, GoalUpdate, GoalResponse, PushSharedGoalRequest, UpdateSharedGoalWeightageRequest
 
 router = APIRouter()
 
@@ -153,20 +153,52 @@ async def return_goal_sheet(
 
 @router.post("/admin/shared-goals")
 async def push_shared_goal(
-    current_user = Depends(require_role("admin")),
+    request: PushSharedGoalRequest,
+    current_user = Depends(require_role("admin", "manager")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Push a goal to multiple employees (Admin only)."""
-    # TODO: Implement push shared goal
-    pass
+    """Push a goal to multiple employees (Admin or Manager only)."""
+    result = await GoalService.push_shared_goals(
+        db,
+        current_user.id,
+        request.thrust_area,
+        request.title,
+        request.description,
+        request.uom_type.value,
+        request.target_value,
+        request.employee_ids
+    )
+    return {
+        "message": f"Goal pushed to {len(result['success'])} employee(s)",
+        "successful": len(result["success"]),
+        "skipped": len(result["skipped"]),
+        "skipped_reasons": {item["employee_id"]: [item.get("reason", "Unknown reason")] for item in result["skipped"]}
+    }
 
 
-@router.patch("/shared-goals/{id}/weightage")
+@router.patch("/shared-goals/{goal_id}/weightage")
 async def update_shared_goal_weightage(
-    id: UUID,
+    goal_id: UUID,
+    request: UpdateSharedGoalWeightageRequest,
     current_user = Depends(require_role("employee")),
     db: AsyncSession = Depends(get_db),
 ):
     """Employee adjusts their weightage for shared goal."""
-    # TODO: Implement update shared goal weightage
-    pass
+    goal = await GoalService.update_shared_goal_weightage(
+        db,
+        goal_id,
+        current_user.id,
+        request.weightage
+    )
+    return goal
+
+
+@router.post("/admin/goal-sheets/{sheet_id}/unlock", response_model=GoalSheetResponse)
+async def admin_unlock_goal_sheet(
+    sheet_id: UUID,
+    current_user = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin unlocks an approved goal sheet (Admin only)."""
+    sheet = await ManagerService.admin_unlock_goal_sheet(db, sheet_id)
+    return sheet

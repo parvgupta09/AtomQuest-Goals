@@ -233,15 +233,23 @@ export default function DashboardPage() {
                                 <TableCell className="font-medium">{goal.title}</TableCell>
                                 <TableCell>{goal.thrust_area}</TableCell>
                                 <TableCell className="text-right">{goal.target_value}</TableCell>
-                                <TableCell className="text-right">{goal.weightage}%</TableCell>
+                                <TableCell className="text-right">
+                                  {goal.weightage === 0 ? (
+                                    <span className="text-gray-400 text-sm">-</span>
+                                  ) : (
+                                    `${goal.weightage}%`
+                                  )}
+                                </TableCell>
                                 <TableCell className="text-center">
-                                  <Badge
-                                    className={
-                                      goal.is_locked ? 'bg-gray-100 text-gray-800' : 'bg-blue-100 text-blue-800'
-                                    }
-                                  >
-                                    {goal.is_locked ? '🔒 Locked' : 'Editable'}
-                                  </Badge>
+                                  {goal.is_locked ? (
+                                    <Badge className="bg-gray-100 text-gray-800">🔒 Locked</Badge>
+                                  ) : goalSheet.status === 'draft' ? (
+                                    <Badge className="bg-blue-100 text-blue-800">Editable</Badge>
+                                  ) : (
+                                    <Badge className={getStatusColor(goalSheet.status)}>
+                                      {goalSheet.status.charAt(0).toUpperCase() + goalSheet.status.slice(1)}
+                                    </Badge>
+                                  )}
                                 </TableCell>
                               </TableRow>
                             ))}

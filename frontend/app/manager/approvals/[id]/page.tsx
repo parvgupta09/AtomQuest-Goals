@@ -144,9 +144,11 @@ export default function ManagerApprovalsPage() {
   }
 
   async function handleReturn() {
-    console.log('Sheet ID for return:', goalSheetId, 'type:', typeof goalSheetId)
+    console.log('Goal sheet ID from params:', goalSheetId)
+    console.log('API URL:', process.env.NEXT_PUBLIC_API_URL)
+
     if (!goalSheetId || goalSheetId === 'undefined') {
-      toast({ title: 'Error', description: 'Invalid page — please go back and try again', variant: 'destructive' })
+      toast({ title: 'Error', description: 'Invalid page URL - please go back and try again', variant: 'destructive' })
       return
     }
 
@@ -156,7 +158,7 @@ export default function ManagerApprovalsPage() {
     }
 
     const url = `/manager/goal-sheets/${goalSheetId}/return`
-    console.log('Calling URL:', url)
+    console.log('Return URL:', url)
 
     setIsReturning(true)
     try {
@@ -178,6 +180,7 @@ export default function ManagerApprovalsPage() {
       }, 1500)
     } catch (err: any) {
       const msg = err?.message || err?.detail || 'Failed to return goal sheet'
+      console.error('Return error:', err)
       toast({
         title: 'Error',
         description: typeof msg === 'string' ? msg : JSON.stringify(msg),
@@ -298,7 +301,13 @@ export default function ManagerApprovalsPage() {
                               })
                             : goal.target_value}
                         </TableCell>
-                        <TableCell className="text-right">{goal.weightage}%</TableCell>
+                        <TableCell className="text-right">
+                          {goal.weightage === 0 ? (
+                            <span className="text-gray-400 text-sm">-</span>
+                          ) : (
+                            `${goal.weightage}%`
+                          )}
+                        </TableCell>
                         <TableCell>
                           <Button
                             size="sm"

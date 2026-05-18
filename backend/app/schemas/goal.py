@@ -83,3 +83,23 @@ class GoalSheetSubmit(BaseModel):
             if goal.weightage < 10.0:
                 raise ValueError(f"Goal '{goal.title}': minimum weightage is 10%, got {goal.weightage}%")
         return v
+
+class PushSharedGoalRequest(BaseModel):
+    thrust_area: str = Field(..., min_length=1, max_length=255)
+    title: str = Field(..., min_length=1, max_length=500)
+    description: str | None = Field(None, max_length=2000)
+    uom_type: UOMType
+    target_value: float
+    employee_ids: list[UUID] = Field(..., min_items=1)
+
+class UpdateSharedGoalWeightageRequest(BaseModel):
+    weightage: float
+
+    @field_validator("weightage")
+    @classmethod
+    def validate_weightage(cls, v):
+        if v < 10.0:
+            raise ValueError("Minimum weightage per goal is 10%")
+        if v > 100.0:
+            raise ValueError("Maximum weightage per goal is 100%")
+        return v

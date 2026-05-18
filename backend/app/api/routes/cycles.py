@@ -27,9 +27,9 @@ async def get_active_cycle(
     db: AsyncSession = Depends(get_db)
 ):
     """Get the currently active goal cycle."""
-    stmt = select(GoalCycle).where(GoalCycle.is_active == True)
+    stmt = select(GoalCycle).where(GoalCycle.is_active == True).order_by(GoalCycle.opens_at.desc())
     result = await db.execute(stmt)
-    cycle = result.scalar_one_or_none()
+    cycle = result.scalars().first()
     if not cycle:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

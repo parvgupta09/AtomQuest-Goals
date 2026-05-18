@@ -124,18 +124,31 @@ export default function AdminCyclesPage() {
 
     setIsSubmitting(true)
     try {
-      await fetchWithAuth(`/cycles/${editingCycleId}`, {
+      // Step 1: Update the phase
+      const updatedCycle: GoalCycle = await fetchWithAuth(`/cycles/${editingCycleId}`, {
         method: 'PATCH',
         body: JSON.stringify({ phase: newPhase }),
       })
 
-      setCycles(cycles.map((c) => c.id === editingCycleId ? { ...c, phase: newPhase } : c))
+      // Step 2: Activate this cycle (deactivates all others)
+      const activatedCycle: GoalCycle = await fetchWithAuth(`/cycles/${editingCycleId}/activate`, {
+        method: 'POST',
+      })
+
+      // Step 3: Update cycles list in state
+      const updatedCycles = cycles.map((c) => 
+        c.id === editingCycleId 
+          ? { ...c, phase: newPhase, is_active: true } 
+          : { ...c, is_active: false }
+      )
+      setCycles(updatedCycles)
+      setActiveCycle(activatedCycle)
       setEditingCycleId(null)
       setNewPhase('')
 
       toast({
         title: 'Success',
-        description: 'Cycle phase updated',
+        description: `Cycle phase updated to ${phaseLabels[newPhase]} and activated`,
       })
     } catch (err) {
       const message = err instanceof ApiError
@@ -332,16 +345,56 @@ export default function AdminCyclesPage() {
                             )}
                           </TableCell>
                           <TableCell className="text-center">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                setEditingCycleId(cycle.id)
-                                setNewPhase(cycle.phase)
-                              }}
-                            >
-                              Update Phase
-                            </Button>
+                            <div className="flex gap-2 justify-center">
+                              {!cycle.is_active && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={async () => {
+                                    setIsSubmitting(true)
+                                    try {
+                                      const activatedCycle: GoalCycle = await fetchWithAuth(`/cycles/${cycle.id}/activate`, {
+                                         method: 'POST',
+                                       })
+                                      const updatedCycles = cycles.map((c) =>
+                                        c.id === cycle.id ? { ...c, is_active: true } : { ...c, is_active: false }
+                                      )
+                                      setCycles(updatedCycles)
+                                      setActiveCycle(activatedCycle)
+                                      toast({
+                                        title: 'Success',
+                                        description: 'Cycle activated',
+                                      })
+                                    } catch (err) {
+                                      const message = err instanceof ApiError
+                                        ? (typeof err.message === 'string' ? err.message : 'Failed to activate cycle')
+                                        : 'Failed to activate cycle'
+                                      toast({
+                                        title: 'Error',
+                                        description: message,
+                                        variant: 'destructive',
+                                      })
+                                    } finally {
+                                      setIsSubmitting(false)
+                                    }
+                                  }}
+                                  disabled={isSubmitting}
+                                >
+                                  Activate
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setEditingCycleId(cycle.id)
+                                  setNewPhase(cycle.phase)
+                                }}
+                                disabled={!cycle.is_active}
+                              >
+                                Update Phase
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}

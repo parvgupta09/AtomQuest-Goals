@@ -495,7 +495,13 @@ export default function GoalsEditPage() {
                           <TableCell>
                             {goal.target_date ? new Date(goal.target_date).toLocaleDateString() : goal.target_value}
                           </TableCell>
-                          <TableCell className="text-right">{goal.weightage}%</TableCell>
+                          <TableCell className="text-right">
+                            {goal.weightage === 0 ? (
+                              <span className="text-gray-400 text-sm">-</span>
+                            ) : (
+                              `${goal.weightage}%`
+                            )}
+                          </TableCell>
                           <TableCell className="flex gap-2">
                             <Button
                               size="sm"

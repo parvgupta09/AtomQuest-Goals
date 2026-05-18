@@ -130,12 +130,22 @@ export default function AchievementsPage() {
         status,
       }
 
+      console.log("Goal details:", {
+        id: goal.id,
+        title: goal.title,
+        uom_type: goal.uom_type,
+        target_value: goal.target_value,
+        target_date: goal.target_date
+      })
       console.log("Achievement payload", achievementData)
 
       const result: Achievement = await fetchWithAuth('/achievements', {
         method: 'POST',
         body: JSON.stringify(achievementData),
       })
+
+      console.log("Received achievement from API:", result)
+      console.log("Progress score value:", result.progress_score, "Type:", typeof result.progress_score)
 
       setGoals(
         goals.map((g) =>
@@ -282,7 +292,9 @@ export default function AchievementsPage() {
                           {goal.description}
                         </CardDescription>
                       </div>
-                      <Badge className="bg-indigo-100 text-indigo-800">{goal.weightage}%</Badge>
+                      <Badge className="bg-indigo-100 text-indigo-800">
+                         {goal.weightage === 0 ? '-' : `${goal.weightage}%`}
+                       </Badge>
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-6">
@@ -308,59 +320,150 @@ export default function AchievementsPage() {
 
                     {/* Achievement Form */}
                     <div className="space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label>Actual Value</Label>
-                          <Input
-                            type="number"
-                            placeholder="Enter actual value"
-                            value={achievementValues[goal.id] || ''}
-                            onChange={(e) =>
-                              setAchievementValues({
-                                ...achievementValues,
-                                [goal.id]: e.target.value,
-                              })
-                            }
-                            onWheel={(e) => e.currentTarget.blur()}
-                            disabled={isSaving === goal.id}
-                          />
+                      {goal.uom_type === 'timeline' ? (
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label>Completion Date</Label>
+                            <Input
+                              type="date"
+                              value={achievementValues[goal.id] ? new Date(goal.target_date || '').toISOString().split('T')[0] : ''}
+                              onChange={(e) => {
+                                setAchievementValues({
+                                  ...achievementValues,
+                                  [goal.id]: e.target.value || '',
+                                })
+                              }}
+                              disabled={isSaving === goal.id}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Completed?</Label>
+                            <div className="flex items-center h-10 border rounded-md px-3">
+                              <input
+                                type="checkbox"
+                                checked={achievementValues[goal.id] === '1'}
+                                onChange={(e) =>
+                                  setAchievementValues({
+                                    ...achievementValues,
+                                    [goal.id]: e.target.checked ? '1' : '0',
+                                  })
+                                }
+                                disabled={isSaving === goal.id}
+                                className="cursor-pointer"
+                              />
+                              <span className="ml-2 text-sm">{achievementValues[goal.id] === '1' ? 'Yes' : 'No'}</span>
+                            </div>
+                          </div>
                         </div>
+                      ) : goal.uom_type === 'zero' ? (
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label>Zero Incidents?</Label>
+                            <div className="flex items-center h-10 border rounded-md px-3">
+                              <input
+                                type="checkbox"
+                                checked={achievementValues[goal.id] === '0'}
+                                onChange={(e) =>
+                                  setAchievementValues({
+                                    ...achievementValues,
+                                    [goal.id]: e.target.checked ? '0' : '1',
+                                  })
+                                }
+                                disabled={isSaving === goal.id}
+                                className="cursor-pointer"
+                              />
+                              <span className="ml-2 text-sm">{achievementValues[goal.id] === '0' ? 'Yes (0 incidents)' : 'No'}</span>
+                            </div>
+                          </div>
 
-                        <div className="space-y-2">
-                          <Label>Status</Label>
-                          <Select
-                            value={achievementStatuses[goal.id] || 'not_started'}
-                            onValueChange={(value) =>
-                              setAchievementStatuses({
-                                ...achievementStatuses,
-                                [goal.id]: value,
-                              })
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="not_started">Not Started</SelectItem>
-                              <SelectItem value="on_track">On Track</SelectItem>
-                              <SelectItem value="completed">Completed</SelectItem>
-                            </SelectContent>
-                          </Select>
+                          <div className="space-y-2">
+                            <Label>Status</Label>
+                            <Select
+                              value={achievementStatuses[goal.id] || 'not_started'}
+                              onValueChange={(value) =>
+                                setAchievementStatuses({
+                                  ...achievementStatuses,
+                                  [goal.id]: value,
+                                })
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="not_started">Not Started</SelectItem>
+                                <SelectItem value="on_track">On Track</SelectItem>
+                                <SelectItem value="completed">Completed</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label>Actual Value</Label>
+                            <Input
+                              type="number"
+                              placeholder="Enter actual value"
+                              value={achievementValues[goal.id] || ''}
+                              onChange={(e) =>
+                                setAchievementValues({
+                                  ...achievementValues,
+                                  [goal.id]: e.target.value,
+                                })
+                              }
+                              onWheel={(e) => e.currentTarget.blur()}
+                              disabled={isSaving === goal.id}
+                            />
+                          </div>
 
-                      {goal.achievement && (
+                          <div className="space-y-2">
+                            <Label>Status</Label>
+                            <Select
+                              value={achievementStatuses[goal.id] || 'not_started'}
+                              onValueChange={(value) =>
+                                setAchievementStatuses({
+                                  ...achievementStatuses,
+                                  [goal.id]: value,
+                                })
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="not_started">Not Started</SelectItem>
+                                <SelectItem value="on_track">On Track</SelectItem>
+                                <SelectItem value="completed">Completed</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      )}
+
+                      {goal.achievement ? (
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
                             <p className="text-sm font-medium">Progress Score</p>
-                            <span className={`text-lg font-bold ${getProgressColor(goal.achievement.progress_score)}`}>
-                              {(goal.achievement.progress_score * 100).toFixed(0)}%
+                            <span className={`text-lg font-bold ${getProgressColor(goal.achievement.progress_score || 0)}`}>
+                              {console.log("Displaying progress score:", goal.achievement.progress_score, "As %:", ((goal.achievement.progress_score || 0) * 100).toFixed(0))}
+                              {((goal.achievement.progress_score || 0) * 100).toFixed(0)}%
                             </span>
                           </div>
                           <Progress
-                            value={Math.min(goal.achievement.progress_score * 100, 100)}
+                            value={Math.min((goal.achievement.progress_score || 0) * 100, 100)}
                             className="h-2"
                           />
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-medium">Progress Score</p>
+                            <span className={`text-lg font-bold ${getProgressColor(0)}`}>
+                              0%
+                            </span>
+                          </div>
+                          <Progress value={0} className="h-2" />
                         </div>
                       )}
 

@@ -306,3 +306,117 @@ class GoalService:
             # Admin can view any sheet (no restriction)
 
         return sheet
+
+    @staticmethod
+    async def push_shared_goals(
+        db: AsyncSession,
+        admin_id: UUID,
+        thrust_area: str,
+        title: str,
+        description: str | None,
+        uom_type: str,
+        target_value: float,
+        employee_ids: list[UUID]
+    ) -> dict:
+        """Push a shared goal to multiple employees."""
+        results = {
+            "success": [],
+            "skipped": []
+        }
+
+        for emp_id in employee_ids:
+            # Get employee
+            stmt = select(User).where(User.id == emp_id)
+            result = await db.execute(stmt)
+            employee = result.scalars().first()
+
+            if not employee:
+                results["skipped"].append({
+                    "employee_id": str(emp_id),
+                    "reason": "Employee not found"
+                })
+                continue
+
+            # Find active goal sheet (draft or approved)
+            stmt = select(GoalSheet).where(
+                (GoalSheet.employee_id == emp_id) &
+                (GoalSheet.status.in_(["draft", "approved", "submitted"]))
+            ).order_by(GoalSheet.created_at.desc())
+            result = await db.execute(stmt)
+            sheet = result.scalars().first()
+
+            if not sheet:
+                results["skipped"].append({
+                    "employee_id": str(emp_id),
+                    "employee_name": employee.name,
+                    "reason": "No active goal sheet found"
+                })
+                continue
+
+            # Create shared goal
+            goal = Goal(
+                goal_sheet_id=sheet.id,
+                thrust_area=thrust_area,
+                title=title,
+                description=description,
+                uom_type=uom_type,
+                target_value=target_value,
+                weightage=0.0,
+                is_shared=True,
+                shared_by=admin_id,
+                is_locked=sheet.status == "approved"
+            )
+            db.add(goal)
+            results["success"].append({
+                "employee_id": str(emp_id),
+                "employee_name": employee.name,
+                "sheet_id": str(sheet.id)
+            })
+
+        await db.commit()
+        return results
+
+    @staticmethod
+    async def update_shared_goal_weightage(
+        db: AsyncSession,
+        goal_id: UUID,
+        employee_id: UUID,
+        weightage: float
+    ) -> Goal:
+        """Employee updates weightage for a shared goal."""
+        stmt = select(Goal).where(Goal.id == goal_id)
+        stmt = stmt.options(selectinload(Goal.goal_sheet))
+        result = await db.execute(stmt)
+        goal = result.scalars().first()
+
+        if not goal:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Goal not found"
+            )
+
+        # Verify is shared
+        if not goal.is_shared:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This is not a shared goal"
+            )
+
+        # Verify ownership of sheet
+        if goal.goal_sheet.employee_id != employee_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to access this resource"
+            )
+
+        # Verify sheet is editable (not locked)
+        if goal.is_locked:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This goal is locked and cannot be modified"
+            )
+
+        goal.weightage = weightage
+        await db.commit()
+        await db.refresh(goal)
+        return goal

@@ -243,3 +243,50 @@ class ManagerService:
         await db.commit()
         await db.refresh(goal)
         return goal
+
+    @staticmethod
+    async def admin_unlock_goal_sheet(
+        db: AsyncSession,
+        goal_sheet_id: UUID
+    ) -> GoalSheet:
+        """Admin unlocks an approved goal sheet, allowing edits."""
+        from app.models.audit_log import AuditLog
+
+        stmt = select(GoalSheet).where(GoalSheet.id == goal_sheet_id)
+        stmt = stmt.options(selectinload(GoalSheet.goals))
+        result = await db.execute(stmt)
+        sheet = result.scalars().first()
+
+        if not sheet:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Goal sheet not found"
+            )
+
+        if sheet.status != "approved":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Goal sheet must be approved to unlock, current status: {sheet.status}"
+            )
+
+        # Unlock sheet and goals
+        sheet.status = "draft"
+        for goal in sheet.goals:
+            goal.is_locked = False
+
+            # Create audit log
+            audit = AuditLog(
+                action="admin_unlock",
+                performed_by=None,
+                target_type="goal",
+                target_id=goal.id,
+                details={
+                    "old_value": {"is_locked": True},
+                    "new_value": {"is_locked": False}
+                }
+            )
+            db.add(audit)
+
+        await db.commit()
+        await db.refresh(sheet)
+        return sheet

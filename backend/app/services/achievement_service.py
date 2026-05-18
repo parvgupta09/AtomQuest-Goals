@@ -32,9 +32,10 @@ class AchievementService:
             score = actual_value / target_value
         elif uom_type == UOMType.NUMERIC_MAX:
             # Lower is better (e.g., Cost, TAT)
-            if actual_value == 0:
-                return 1.0
-            score = target_value / actual_value
+            # Score based on how close actual is to target (lower actual is better)
+            if target_value == 0:
+                return 1.0 if actual_value == 0 else 0.0
+            score = actual_value / target_value
         elif uom_type == UOMType.TIMELINE:
             # Date-based: 1.0 if on or before target, else partial
             if actual_date and target_date:
@@ -95,6 +96,7 @@ class AchievementService:
         # Note: we allow logging in any phase for demo purposes
         # Verify check-in window is open (timezone-safe comparison)
         now = datetime.now(timezone.utc)
+        cycle = goal.goal_sheet.cycle
         opens = cycle.opens_at
         closes = cycle.closes_at
         # Make timezone-naive if DB stores without tz
@@ -108,6 +110,13 @@ class AchievementService:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Check-in window is currently closed (opens {opens.date()}, closes {closes.date()})",
+            )
+
+        # Verify that the cycle_phase being logged matches the active cycle's phase
+        if achievement_data.cycle_phase != cycle.phase:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot log {achievement_data.cycle_phase} achievement during {cycle.phase} phase. Current active phase is {cycle.phase}.",
             )
 
         # Check if achievement already exists for this goal+phase
@@ -163,6 +172,13 @@ class AchievementService:
             db.add(achievement)
             await db.commit()
             await db.refresh(achievement)
+            
+            # If this is a shared goal, sync achievements to other employees with the same goal
+            if goal.is_shared:
+                await AchievementService._sync_shared_goal_achievements(
+                    db, goal, achievement_data, progress_score
+                )
+            
             return achievement
 
     @staticmethod
@@ -225,4 +241,75 @@ class AchievementService:
 
         await db.commit()
         await db.refresh(achievement)
+        
+        # If this is a shared goal, sync the update to other employees
+        if achievement.goal.is_shared:
+            await AchievementService._sync_shared_goal_achievements(
+                db,
+                achievement.goal,
+                AchievementCreate(
+                    goal_id=achievement.goal_id,
+                    cycle_phase=achievement.cycle_phase,
+                    actual_value=actual_value,
+                    actual_date=actual_date,
+                    status=status,
+                ),
+                achievement.progress_score,
+            )
+        
         return achievement
+
+    @staticmethod
+    async def _sync_shared_goal_achievements(
+        db: AsyncSession,
+        goal: Goal,
+        achievement_data: AchievementCreate,
+        progress_score: float | None,
+    ) -> None:
+        """Sync achievement to other employees who have the same shared goal."""
+        # Find all goals with same title, thrust_area, target_value, and shared_by
+        # (they're the "same" shared goal pushed to different employees)
+        stmt = select(Goal).where(
+            (Goal.title == goal.title) &
+            (Goal.thrust_area == goal.thrust_area) &
+            (Goal.target_value == goal.target_value) &
+            (Goal.shared_by == goal.shared_by) &
+            (Goal.is_shared == True) &
+            (Goal.id != goal.id)  # Exclude the current goal
+        ).options(selectinload(Goal.goal_sheet))
+        
+        result = await db.execute(stmt)
+        other_shared_goals = result.scalars().all()
+        
+        # For each other employee's shared goal, create/update their achievement
+        for other_goal in other_shared_goals:
+            # Check if achievement already exists
+            stmt = select(Achievement).where(
+                (Achievement.goal_id == other_goal.id) &
+                (Achievement.cycle_phase == achievement_data.cycle_phase)
+            )
+            result = await db.execute(stmt)
+            existing = result.scalars().first()
+            
+            if existing:
+                # Update existing
+                existing.actual_value = achievement_data.actual_value
+                existing.actual_date = achievement_data.actual_date
+                existing.status = achievement_data.status
+                existing.progress_score = progress_score
+                existing.updated_at = datetime.now(timezone.utc)
+            else:
+                # Create new
+                new_achievement = Achievement(
+                    goal_id=other_goal.id,
+                    goal_sheet_id=other_goal.goal_sheet_id,
+                    cycle_phase=achievement_data.cycle_phase,
+                    actual_value=achievement_data.actual_value,
+                    actual_date=achievement_data.actual_date,
+                    status=achievement_data.status,
+                    progress_score=progress_score,
+                    updated_at=datetime.now(timezone.utc),
+                )
+                db.add(new_achievement)
+        
+        await db.commit()

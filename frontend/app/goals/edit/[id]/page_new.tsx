@@ -385,6 +385,7 @@ export default function GoalsEditPage() {
                               max="100"
                               value={goal.weightage}
                               onChange={(e) => updateGoalField(goal.id, 'weightage', Number(e.target.value))}
+                              onWheel={(e) => e.currentTarget.blur()}
                               className="text-sm"
                             />
                           </div>
@@ -409,6 +410,7 @@ export default function GoalsEditPage() {
                                   type="number"
                                   value={goal.target_value || ''}
                                   onChange={(e) => updateGoalField(goal.id, 'target_value', Number(e.target.value))}
+                                  onWheel={(e) => e.currentTarget.blur()}
                                   className="text-sm"
                                 />
                               </div>
@@ -515,6 +517,7 @@ export default function GoalsEditPage() {
                         placeholder="e.g., 100000"
                         value={targetValue}
                         onChange={(e) => setTargetValue(e.target.value)}
+                        onWheel={(e) => e.currentTarget.blur()}
                       />
                     </div>
                   )}
@@ -540,6 +543,7 @@ export default function GoalsEditPage() {
                     placeholder="10-100"
                     value={weightage}
                     onChange={(e) => setWeightage(e.target.value)}
+                    onWheel={(e) => e.currentTarget.blur()}
                   />
                 </div>
 
