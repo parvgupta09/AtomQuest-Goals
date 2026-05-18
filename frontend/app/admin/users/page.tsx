@@ -62,6 +62,11 @@ export default function AdminUsersPage() {
       return
     }
 
+    if (password.length < 8) {
+      toast({ title: 'Error', description: 'Password must be at least 8 characters', variant: 'destructive' })
+      return
+    }
+
     setIsSubmitting(true)
     try {
       const userData: CreateUserInput = {
@@ -97,10 +102,17 @@ export default function AdminUsersPage() {
         description: 'User created successfully',
       })
     } catch (err) {
+      // Keep dialog open so user can fix the issue
       if (err instanceof ApiError) {
         toast({
           title: 'Error',
           description: err.message,
+          variant: 'destructive',
+        })
+      } else {
+        toast({
+          title: 'Error',
+          description: 'Failed to create user',
           variant: 'destructive',
         })
       }
@@ -139,7 +151,11 @@ export default function AdminUsersPage() {
                   <h1 className="text-3xl font-bold">Manage Users</h1>
                   <p className="text-gray-600 mt-1">Create and manage user accounts and roles</p>
                 </div>
-                <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                <div className="flex gap-2">
+                  <Link href="/admin/dashboard">
+                    <Button variant="outline">Back</Button>
+                  </Link>
+                  <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                   <DialogTrigger asChild>
                     <Button className="bg-indigo-600 hover:bg-indigo-700">+ Create User</Button>
                   </DialogTrigger>
@@ -179,6 +195,7 @@ export default function AdminUsersPage() {
                           onChange={(e) => setPassword(e.target.value)}
                           disabled={isSubmitting}
                         />
+                        <p style={{ fontSize: '12px', color: '#6B7280' }}>Minimum 8 characters</p>
                       </div>
 
                       <div className="space-y-2">
@@ -242,6 +259,7 @@ export default function AdminUsersPage() {
                     </div>
                   </DialogContent>
                 </Dialog>
+                </div>
               </div>
 
               <Card>

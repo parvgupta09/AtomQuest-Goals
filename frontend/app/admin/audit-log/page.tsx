@@ -32,15 +32,12 @@ export default function AdminAuditLogPage() {
     async function loadAuditLog() {
       try {
         const data: AuditLog[] = await fetchWithAuth('/reports/audit-log')
-        setLogs(data)
+        setLogs(data || [])
       } catch (err) {
         if (err instanceof ApiError) {
-          let message = 'Failed to load audit log'
-          if (typeof err.message === 'string') {
-            message = err.message
-          } else if (err.message?.message) {
-            message = err.message.message
-          }
+          const message = 
+            err?.response?.data?.detail ||
+            (typeof err.message === 'string' ? err.message : 'Failed to load audit log')
           toast({
             title: 'Error',
             description: message,
@@ -98,9 +95,9 @@ export default function AdminAuditLogPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  {logs.length === 0 ? (
+                  {(logs?.length || 0) === 0 ? (
                     <div className="text-center py-8">
-                      <p className="text-gray-500">No audit logs found</p>
+                      <p className="text-gray-500">No audit entries yet. Changes to approved goals will appear here.</p>
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
@@ -115,7 +112,7 @@ export default function AdminAuditLogPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {logs.map((log) => (
+                          {(logs || []).map((log) => (
                             <TableRow key={log.id}>
                               <TableCell className="font-medium">{log.goal_title}</TableCell>
                               <TableCell>

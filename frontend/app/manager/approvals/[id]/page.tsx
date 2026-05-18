@@ -28,6 +28,7 @@ export default function ManagerApprovalsPage() {
   const [goals, setGoals] = useState<Goal[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isReturning, setIsReturning] = useState(false)
 
   // Edit dialog state
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null)
@@ -119,54 +120,71 @@ export default function ManagerApprovalsPage() {
         method: 'POST',
       })
 
+      // Update local state immediately
+      setGoalSheet(prev => prev ? { ...prev, status: 'approved' } : prev)
+
       toast({
         title: 'Success',
-        description: 'Goals approved and locked successfully',
+        description: 'Goals approved and locked successfully!',
       })
 
-      router.push('/manager/dashboard')
+      setTimeout(() => {
+        router.push('/manager/dashboard')
+      }, 1500)
     } catch (err) {
-      if (err instanceof ApiError) {
-        toast({
-          title: 'Error',
-          description: err.message,
-          variant: 'destructive',
-        })
-      }
+      const message = err instanceof Error ? err.message : 'Failed to approve goals'
+      toast({
+        title: 'Error',
+        description: message,
+        variant: 'destructive',
+      })
     } finally {
       setIsSubmitting(false)
     }
   }
 
   async function handleReturn() {
-    if (!goalSheet || !returnComment.trim()) {
-      toast({ title: 'Error', description: 'Please provide a comment', variant: 'destructive' })
+    console.log('Sheet ID for return:', goalSheetId, 'type:', typeof goalSheetId)
+    if (!goalSheetId || goalSheetId === 'undefined') {
+      toast({ title: 'Error', description: 'Invalid page — please go back and try again', variant: 'destructive' })
       return
     }
 
-    setIsSubmitting(true)
+    if (!returnComment.trim()) {
+      toast({ title: 'Error', description: 'Please enter feedback', variant: 'destructive' })
+      return
+    }
+
+    const url = `/manager/goal-sheets/${goalSheetId}/return`
+    console.log('Calling URL:', url)
+
+    setIsReturning(true)
     try {
-      await fetchWithAuth(`/manager/goal-sheets/${goalSheetId}/return`, {
+      await fetchWithAuth(url, {
         method: 'POST',
         body: JSON.stringify({ comment: returnComment }),
       })
 
+      setGoalSheet(prev => prev ? { ...prev, status: 'returned' } : prev)
+      setShowReturnDialog(false)
+
       toast({
         title: 'Success',
-        description: 'Goals returned for rework',
+        description: 'Goal sheet returned for rework!',
       })
 
-      router.push('/manager/dashboard')
-    } catch (err) {
-      if (err instanceof ApiError) {
-        toast({
-          title: 'Error',
-          description: err.message,
-          variant: 'destructive',
-        })
-      }
+      setTimeout(() => {
+        router.push('/manager/dashboard')
+      }, 1500)
+    } catch (err: any) {
+      const msg = err?.message || err?.detail || 'Failed to return goal sheet'
+      toast({
+        title: 'Error',
+        description: typeof msg === 'string' ? msg : JSON.stringify(msg),
+        variant: 'destructive',
+      })
     } finally {
-      setIsSubmitting(false)
+      setIsReturning(false)
     }
   }
 
@@ -234,9 +252,16 @@ export default function ManagerApprovalsPage() {
                   </div>
                   <div>
                     <p className="text-xs text-gray-600 uppercase">Status</p>
-                    <Badge className={goalSheet.status === 'submitted' ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'}>
-                      {goalSheet.status === 'submitted' ? 'Pending Review' : 'Already Approved'}
-                    </Badge>
+                    {(() => {
+                      const statusConfig: Record<string, { label: string; className: string }> = {
+                        submitted: { label: 'Pending Review', className: 'bg-amber-100 text-amber-800' },
+                        approved: { label: 'Already Approved', className: 'bg-green-100 text-green-800' },
+                        returned: { label: 'Returned for Rework', className: 'bg-red-100 text-red-800' },
+                        draft: { label: 'Draft', className: 'bg-gray-100 text-gray-800' },
+                      }
+                      const cfg = statusConfig[goalSheet.status] || statusConfig.draft
+                      return <Badge className={cfg.className}>{cfg.label}</Badge>
+                    })()}
                   </div>
                 </div>
               </CardContent>
@@ -307,13 +332,13 @@ export default function ManagerApprovalsPage() {
                   onClick={() => setShowReturnDialog(true)}
                   variant="outline"
                   className="border-red-200 text-red-600 hover:bg-red-50"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isReturning}
                 >
                   Return for Rework
                 </Button>
                 <Button
                   onClick={handleApprove}
-                  disabled={totalWeightage !== 100 || isSubmitting}
+                  disabled={totalWeightage !== 100 || isSubmitting || isReturning}
                   className="bg-green-600 hover:bg-green-700 disabled:bg-gray-300"
                 >
                   {isSubmitting ? 'Processing...' : 'Approve Goals'}
@@ -345,6 +370,7 @@ export default function ManagerApprovalsPage() {
                     type="number"
                     value={editTargetValue}
                     onChange={(e) => setEditTargetValue(e.target.value)}
+                    onWheel={(e) => e.currentTarget.blur()}
                   />
                 </div>
               )}
@@ -357,6 +383,7 @@ export default function ManagerApprovalsPage() {
                   max="100"
                   value={editWeightage}
                   onChange={(e) => setEditWeightage(e.target.value)}
+                  onWheel={(e) => e.currentTarget.blur()}
                 />
               </div>
 
@@ -402,15 +429,16 @@ export default function ManagerApprovalsPage() {
                 <Button
                   variant="outline"
                   onClick={() => setShowReturnDialog(false)}
+                  disabled={isReturning}
                 >
                   Cancel
                 </Button>
                 <Button
                   className="bg-red-600 hover:bg-red-700"
                   onClick={handleReturn}
-                  disabled={isSubmitting}
+                  disabled={isReturning || !returnComment.trim()}
                 >
-                  {isSubmitting ? 'Processing...' : 'Return'}
+                  {isReturning ? 'Returning...' : 'Return'}
                 </Button>
               </div>
             </div>

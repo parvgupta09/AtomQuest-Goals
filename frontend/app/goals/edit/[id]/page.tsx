@@ -38,6 +38,7 @@ export default function GoalsEditPage() {
   const [weightage, setWeightage] = useState('')
 
   const [goals, setGoals] = useState<any[]>([])
+  const [editingGoalId, setEditingGoalId] = useState<string | null>(null)
 
   useEffect(() => {
     async function loadGoalSheet() {
@@ -72,7 +73,9 @@ export default function GoalsEditPage() {
     loadGoalSheet()
   }, [goalSheetId])
 
-  const totalWeightage = goals.reduce((sum, goal) => sum + (goal.weightage || 0), 0) + (weightage ? Number(weightage) : 0)
+  const totalWeightage = goals
+    .filter((g) => g.id !== editingGoalId)
+    .reduce((sum, goal) => sum + (goal.weightage || 0), 0) + (weightage ? Number(weightage) : 0)
 
   const getWeightageColor = () => {
     if (totalWeightage === 100) return 'text-green-600'
@@ -103,14 +106,22 @@ export default function GoalsEditPage() {
       return
     }
 
-    if (totalWeightage > 100) {
-      toast({ title: 'Error', description: 'Total weightage cannot exceed 100%', variant: 'destructive' })
-      return
-    }
+    if (editingGoalId) {
+      const otherGoals = goals.filter((g) => g.id !== editingGoalId)
+      if (otherGoals.reduce((sum, g) => sum + g.weightage, 0) + w > 100) {
+        toast({ title: 'Error', description: 'Total weightage cannot exceed 100%', variant: 'destructive' })
+        return
+      }
+    } else {
+      if (totalWeightage > 100) {
+        toast({ title: 'Error', description: 'Total weightage cannot exceed 100%', variant: 'destructive' })
+        return
+      }
 
-    if (goals.length >= 8) {
-      toast({ title: 'Error', description: 'Maximum 8 goals per sheet', variant: 'destructive' })
-      return
+      if (goals.length >= 8) {
+        toast({ title: 'Error', description: 'Maximum 8 goals per sheet', variant: 'destructive' })
+        return
+      }
     }
 
     try {
@@ -136,12 +147,32 @@ export default function GoalsEditPage() {
         goalData.target_date = targetDate
       }
 
-      const newGoal = await fetchWithAuth(`/goal-sheets/${goalSheet.id}/goals`, {
-        method: 'POST',
-        body: JSON.stringify(goalData),
-      })
+      if (editingGoalId) {
+        // Update existing goal via API
+        if (goalSheet) {
+          await fetchWithAuth(`/goal-sheets/${goalSheet.id}/goals/${editingGoalId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(goalData),
+          })
+        }
+        setGoals(prev => {
+          const filtered = prev.filter(g => g.id !== editingGoalId)
+          return [...filtered, { id: editingGoalId, ...goalData }]
+        })
+        toast({ title: 'Success', description: 'Goal updated' })
+      } else {
+        const newGoal = await fetchWithAuth(`/goal-sheets/${goalSheet.id}/goals`, {
+          method: 'POST',
+          body: JSON.stringify(goalData),
+        })
 
-      setGoals([...goals, newGoal])
+        setGoals([...goals, newGoal])
+
+        toast({
+          title: 'Success',
+          description: 'Goal added successfully',
+        })
+      }
 
       // Reset form
       setThrustArea('')
@@ -151,11 +182,7 @@ export default function GoalsEditPage() {
       setTargetValue('')
       setTargetDate('')
       setWeightage('')
-
-      toast({
-        title: 'Success',
-        description: 'Goal added successfully',
-      })
+      setEditingGoalId(null)
     } catch (err) {
       if (err instanceof ApiError) {
         const message = typeof err.message === 'string' ? err.message : 'Failed to add goal'
@@ -169,25 +196,33 @@ export default function GoalsEditPage() {
   }
 
   async function handleDeleteGoal(goalId: string) {
-    try {
-      await fetchWithAuth(`/goal-sheets/${goalSheet?.id}/goals/${goalId}`, {
-        method: 'DELETE',
-      })
-      setGoals(goals.filter((g) => g.id !== goalId))
-      toast({
-        title: 'Success',
-        description: 'Goal deleted successfully',
-      })
-    } catch (err) {
-      if (err instanceof ApiError) {
-        const message = typeof err.message === 'string' ? err.message : 'Failed to delete goal'
-        toast({
-          title: 'Error',
-          description: message,
-          variant: 'destructive',
+    // Update UI immediately (optimistic)
+    setGoals(prev => prev.filter((g) => g.id !== goalId))
+    toast({ title: 'Success', description: 'Goal removed' })
+
+    // Then call API only for persisted goals
+    if (!goalId.startsWith('temp-') && goalSheet) {
+      try {
+        await fetchWithAuth(`/goal-sheets/${goalSheet.id}/goals/${goalId}`, {
+          method: 'DELETE',
         })
+      } catch (err) {
+        // Already removed from UI, just log
+        console.error('Delete API error:', err)
       }
     }
+  }
+
+  function handleEditGoal(goal: any) {
+    setThrustArea(goal.thrust_area)
+    setTitle(goal.title)
+    setDescription(goal.description || '')
+    setUomType(goal.uom_type)
+    setTargetValue(goal.target_value?.toString() || '')
+    setTargetDate(goal.target_date || '')
+    setWeightage(goal.weightage.toString())
+    setEditingGoalId(goal.id)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   async function handleSubmit() {
@@ -215,13 +250,32 @@ export default function GoalsEditPage() {
       })
       router.push('/dashboard')
     } catch (err) {
-      if (err instanceof ApiError) {
-        const message = typeof err.message === 'string' ? err.message : 'Failed to resubmit goals'
+      const isNetworkError = !(err instanceof ApiError)
+      if (isNetworkError) {
+        // Re-verify whether submit actually landed on backend
+        try {
+          const sheets: GoalSheet[] = await fetchWithAuth('/goal-sheets/mine')
+          const maybeSubmitted = sheets?.find(
+            (s) => s.id === goalSheet.id && s.status === 'submitted'
+          )
+          if (maybeSubmitted) {
+            toast({ title: 'Submitted!', description: 'Your goals were resubmitted successfully.' })
+            router.push('/dashboard')
+            return
+          }
+        } catch {
+          // ignore re-verify errors
+        }
         toast({
-          title: 'Error',
-          description: message,
+          title: 'Network Error',
+          description: 'Could not reach the server. Please check your connection and try again.',
           variant: 'destructive',
         })
+      } else {
+        const message = err instanceof ApiError
+          ? (typeof err.message === 'string' ? err.message : 'Failed to resubmit goals')
+          : 'Failed to resubmit goals'
+        toast({ title: 'Error', description: message, variant: 'destructive' })
       }
     } finally {
       setIsSubmitting(false)
@@ -329,6 +383,7 @@ export default function GoalsEditPage() {
                         placeholder="e.g., 100000"
                         value={targetValue}
                         onChange={(e) => setTargetValue(e.target.value)}
+                        onWheel={(e) => e.currentTarget.blur()}
                       />
                     </div>
                   )}
@@ -354,6 +409,7 @@ export default function GoalsEditPage() {
                     placeholder="10-100"
                     value={weightage}
                     onChange={(e) => setWeightage(e.target.value)}
+                    onWheel={(e) => e.currentTarget.blur()}
                   />
                 </div>
 
@@ -362,8 +418,25 @@ export default function GoalsEditPage() {
                     onClick={handleAddGoal}
                     className="bg-indigo-600 hover:bg-indigo-700"
                   >
-                    Add Goal
+                    {editingGoalId ? 'Update Goal' : 'Add Goal'}
                   </Button>
+                  {editingGoalId && (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setEditingGoalId(null)
+                        setThrustArea('')
+                        setTitle('')
+                        setDescription('')
+                        setUomType('numeric_min')
+                        setTargetValue('')
+                        setTargetDate('')
+                        setWeightage('')
+                      }}
+                    >
+                      Cancel Edit
+                    </Button>
+                  )}
                   <Link href="/dashboard">
                     <Button variant="outline">Cancel</Button>
                   </Link>
@@ -423,7 +496,15 @@ export default function GoalsEditPage() {
                             {goal.target_date ? new Date(goal.target_date).toLocaleDateString() : goal.target_value}
                           </TableCell>
                           <TableCell className="text-right">{goal.weightage}%</TableCell>
-                          <TableCell>
+                          <TableCell className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleEditGoal(goal)}
+                              className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                            >
+                              ✎
+                            </Button>
                             <Button
                               size="sm"
                               variant="ghost"
@@ -448,7 +529,7 @@ export default function GoalsEditPage() {
               </Link>
               <Button
                 onClick={handleSubmit}
-                disabled={goals.length === 0 || totalWeightage !== 100 || isSubmitting}
+                disabled={goals.length === 0 || totalWeightage !== 100 || isSubmitting || !!editingGoalId}
                 className="bg-green-600 hover:bg-green-700 disabled:bg-gray-300"
               >
                 {isSubmitting ? 'Resubmitting...' : 'Resubmit for Approval'}

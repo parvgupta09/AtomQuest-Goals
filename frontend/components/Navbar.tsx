@@ -32,11 +32,18 @@ export function Navbar() {
 
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-gray-700">{user.name}</span>
+            <Link href="/profile" className="text-sm font-medium text-gray-700 hover:text-indigo-600 transition-colors">
+              {user.name}
+            </Link>
             <Badge className={roleColors[user.role] || 'bg-gray-100 text-gray-800'}>
               {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
             </Badge>
           </div>
+          <Link href="/profile">
+            <Button variant="ghost" size="sm" className="text-gray-600 hover:text-indigo-600">
+              Profile
+            </Button>
+          </Link>
           <Button
             variant="ghost"
             size="sm"

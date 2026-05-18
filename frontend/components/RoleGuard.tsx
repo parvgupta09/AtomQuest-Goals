@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { getUser, getRoleRedirect } from '@/lib/auth'
+import { getUser, getRoleRedirect, logout } from '@/lib/auth'
 import { Spinner } from '@/components/ui/spinner'
+import { fetchWithAuth, ApiError } from '@/lib/api'
 
 interface RoleGuardProps {
   children: React.ReactNode
@@ -16,21 +17,43 @@ export function RoleGuard({ children, allowedRoles }: RoleGuardProps) {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    const user = getUser()
+    async function verifyAuth() {
+      try {
+        const user = getUser()
 
-    if (!user) {
-      router.push('/login')
-      return
+        if (!user) {
+          router.push('/login')
+          setIsLoading(false)
+          return
+        }
+
+        if (!allowedRoles.includes(user.role)) {
+          router.push(getRoleRedirect(user.role))
+          setIsLoading(false)
+          return
+        }
+
+        // Verify token is still valid by calling /auth/me
+        try {
+          await fetchWithAuth('/auth/me')
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 401) {
+            logout()
+            return
+          }
+          // Other errors are non-fatal, allow page to load
+        }
+
+        setIsAuthorized(true)
+        setIsLoading(false)
+      } catch (err) {
+        console.error('Auth verification failed:', err)
+        logout()
+      }
     }
 
-    if (!allowedRoles.includes(user.role)) {
-      router.push(getRoleRedirect(user.role))
-      return
-    }
-
-    setIsAuthorized(true)
-    setIsLoading(false)
-  }, [])
+    verifyAuth()
+  }, [router, allowedRoles])
 
   if (isLoading) {
     return (

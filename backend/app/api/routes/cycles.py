@@ -6,7 +6,7 @@ from sqlalchemy import select
 from app.core.database import get_db
 from app.core.security import get_current_user, require_role
 from app.models.goal_cycle import GoalCycle
-from app.schemas.goal_cycle import CycleCreate, CycleResponse
+from app.schemas.goal_cycle import CycleCreate, CycleResponse, CycleUpdate
 
 router = APIRouter(prefix="/cycles")
 
@@ -58,7 +58,7 @@ async def create_cycle(
 @router.patch("/{cycle_id}", response_model=CycleResponse)
 async def update_cycle(
     cycle_id: UUID,
-    cycle_data: dict,
+    cycle_data: CycleUpdate,
     current_user: dict = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db)
 ):
@@ -73,8 +73,9 @@ async def update_cycle(
             detail="Cycle not found"
         )
 
-    for key, value in cycle_data.items():
-        if hasattr(cycle, key) and value is not None:
+    update_data = cycle_data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        if hasattr(cycle, key):
             setattr(cycle, key, value)
 
     await db.commit()
@@ -94,6 +95,9 @@ async def activate_cycle(
     active_cycles = result.scalars().all()
     for cycle in active_cycles:
         cycle.is_active = False
+
+    # Flush so the deactivation is visible in the same transaction
+    await db.flush()
 
     # Activate the requested cycle
     stmt = select(GoalCycle).where(GoalCycle.id == cycle_id)

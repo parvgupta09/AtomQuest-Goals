@@ -20,9 +20,15 @@ interface GoalWithAchievement extends Goal {
   achievement?: Achievement
 }
 
+interface GoalCycle {
+  id: string
+  phase: string
+}
+
 export default function AchievementsPage() {
   const { toast } = useToast()
   const [goalSheet, setGoalSheet] = useState<GoalSheet | null>(null)
+  const [cycle, setCycle] = useState<GoalCycle | null>(null)
   const [goals, setGoals] = useState<GoalWithAchievement[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState<string | null>(null)
@@ -30,10 +36,17 @@ export default function AchievementsPage() {
   // Form state for achievements
   const [achievementValues, setAchievementValues] = useState<Record<string, string>>({})
   const [achievementStatuses, setAchievementStatuses] = useState<Record<string, string>>({})
+  const [selectedPhase, setSelectedPhase] = useState('q1')
 
   useEffect(() => {
     async function loadData() {
       try {
+        // Load active cycle to get current phase
+        const activeCycle: GoalCycle = await fetchWithAuth('/cycles/active')
+        setCycle(activeCycle)
+        // Auto-select current phase so it matches the backend
+        setSelectedPhase(activeCycle.phase)
+
         const sheets: GoalSheet[] = await fetchWithAuth('/goal-sheets/mine')
         if (sheets && sheets.length > 0) {
           const approved = sheets.find((s) => s.status === 'approved')
@@ -42,20 +55,28 @@ export default function AchievementsPage() {
             setGoalSheet(detail)
 
             if (detail.goals) {
-              // Load achievements for each goal
-              const goalsWithAchievements: GoalWithAchievement[] = await Promise.all(
-                detail.goals.map(async (goal) => {
-                  try {
-                    const achievement: Achievement = await fetchWithAuth(`/goals/${goal.id}/achievements`)
-                    return { ...goal, achievement }
-                  } catch {
-                    return goal
-                  }
-                }),
-              )
+              // Load all achievements for the sheet using the correct endpoint
+              let achievementMap: Record<string, Achievement> = {}
+              try {
+                const sheetAchievements: Achievement[] = await fetchWithAuth(
+                  `/achievements/goal-sheets/${approved.id}/achievements`
+                )
+                if (sheetAchievements) {
+                  sheetAchievements.forEach((a) => {
+                    achievementMap[a.goal_id] = a
+                  })
+                }
+              } catch {
+                // no achievements yet is fine
+              }
+
+              const goalsWithAchievements: GoalWithAchievement[] = detail.goals.map((goal) => ({
+                ...goal,
+                achievement: achievementMap[goal.id],
+              }))
               setGoals(goalsWithAchievements)
 
-              // Initialize form state
+              // Initialize form state from existing achievements
               const values: Record<string, string> = {}
               const statuses: Record<string, string> = {}
               goalsWithAchievements.forEach((g) => {
@@ -93,16 +114,23 @@ export default function AchievementsPage() {
       return
     }
 
+    if (!cycle) {
+      toast({ title: 'Error', description: 'Unable to determine current cycle', variant: 'destructive' })
+      return
+    }
+
     setIsSaving(goal.id)
     try {
       const today = new Date().toISOString().split('T')[0]
       const achievementData = {
         goal_id: goal.id,
-        cycle_phase: 'goal_setting',
+        cycle_phase: selectedPhase,
         actual_value: value ? Number(value) : 0,
         actual_date: today,
         status,
       }
+
+      console.log("Achievement payload", achievementData)
 
       const result: Achievement = await fetchWithAuth('/achievements', {
         method: 'POST',
@@ -115,6 +143,9 @@ export default function AchievementsPage() {
         ),
       )
 
+      const updated: GoalSheet = await fetchWithAuth(`/goal-sheets/${goalSheet.id}`)
+      setGoalSheet(updated)
+
       toast({
         title: 'Success',
         description: 'Achievement logged successfully',
@@ -122,12 +153,18 @@ export default function AchievementsPage() {
     } catch (err) {
       let message = 'Failed to save achievement'
       if (err instanceof ApiError) {
-        if (typeof err.message === 'string') {
+        // Extract error message from various response formats
+        if (err?.response?.data?.detail) {
+          message = typeof err.response.data.detail === 'string' 
+            ? err.response.data.detail 
+            : JSON.stringify(err.response.data.detail)
+        } else if (typeof err.message === 'string' && err.message !== 'ApiError') {
           message = err.message
-        } else if (err.message?.message) {
-          message = err.message.message
         }
+      } else if (err instanceof Error) {
+        message = err.message
       }
+      console.error("Achievement error", err)
       toast({
         title: 'Error',
         description: message,
@@ -210,6 +247,29 @@ export default function AchievementsPage() {
               <p className="text-gray-600 mt-1">Update your quarterly progress on approved goals</p>
             </div>
 
+            {/* Phase Selector */}
+            <Card className="bg-indigo-50 border-indigo-200">
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-4">
+                  <Label className="font-semibold">Review Quarter:</Label>
+                  <Select value={selectedPhase} onValueChange={setSelectedPhase}>
+                    <SelectTrigger className="w-48">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="q1">Q1 (July)</SelectItem>
+                      <SelectItem value="q2">Q2 (October)</SelectItem>
+                      <SelectItem value="q3">Q3 (January)</SelectItem>
+                      <SelectItem value="q4">Q4 (Annual)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-sm text-indigo-700">
+                    Current cycle phase: <strong>{cycle?.phase?.replace('_', ' ').toUpperCase() || '—'}</strong>
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Goals Cards */}
             <div className="grid gap-6">
               {goals.map((goal) => (
@@ -261,6 +321,7 @@ export default function AchievementsPage() {
                                 [goal.id]: e.target.value,
                               })
                             }
+                            onWheel={(e) => e.currentTarget.blur()}
                             disabled={isSaving === goal.id}
                           />
                         </div>

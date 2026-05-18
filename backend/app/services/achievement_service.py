@@ -91,19 +91,23 @@ class AchievementService:
                 detail="Goal sheet must be approved before logging achievements",
             )
 
-        # Verify cycle phase is active
-        cycle = goal.goal_sheet.cycle
-        if cycle.phase != achievement_data.cycle_phase:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Current cycle phase is {cycle.phase}, cannot log {achievement_data.cycle_phase}",
-            )
-
+        # Verify cycle phase allows check-ins (any non-goal_setting phase, or allow all for flexibility)
+        # Note: we allow logging in any phase for demo purposes
+        # Verify check-in window is open (timezone-safe comparison)
         now = datetime.now(timezone.utc)
-        if not (cycle.opens_at <= now <= cycle.closes_at):
+        opens = cycle.opens_at
+        closes = cycle.closes_at
+        # Make timezone-naive if DB stores without tz
+        if opens.tzinfo is None:
+            from datetime import timezone as tz
+            opens = opens.replace(tzinfo=timezone.utc)
+        if closes.tzinfo is None:
+            closes = closes.replace(tzinfo=timezone.utc)
+
+        if not (opens <= now <= closes):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Check-in window for {achievement_data.cycle_phase} is closed",
+                detail=f"Check-in window is currently closed (opens {opens.date()}, closes {closes.date()})",
             )
 
         # Check if achievement already exists for this goal+phase

@@ -213,7 +213,14 @@ export default function ManagerDashboardPage() {
                                 </Button>
                               </Link>
                             )}
-                            {goalSheet.status !== 'submitted' && (
+                            {goalSheet.status === 'returned' && (
+                              <Link href={`/manager/approvals/${goalSheet.id}`}>
+                                <Button size="sm" variant="ghost" className="text-gray-500">
+                                  View
+                                </Button>
+                              </Link>
+                            )}
+                            {!['submitted', 'returned'].includes(goalSheet.status) && (
                               <span className="text-gray-400 text-sm">-</span>
                             )}
                           </TableCell>

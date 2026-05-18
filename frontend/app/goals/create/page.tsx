@@ -37,33 +37,38 @@ export default function GoalsCreatePage() {
   const [weightage, setWeightage] = useState('')
 
   const [goals, setGoals] = useState<any[]>([])
+  const [editingGoalId, setEditingGoalId] = useState<string | null>(null)
 
   useEffect(() => {
-    async function initializeGoalSheet() {
+    async function loadCycle() {
       try {
-        // Get active cycle
         const cycleData: GoalCycle = await fetchWithAuth('/cycles/active')
         setCycle(cycleData)
 
-        // Try to get existing goal sheet for this cycle
         const sheetsData: GoalSheet[] = await fetchWithAuth('/goal-sheets/mine')
-        const existing = sheetsData?.find((s) => s.cycle_id === cycleData.id)
 
-        if (existing) {
-          const detail: GoalSheet = await fetchWithAuth(`/goal-sheets/${existing.id}`)
+        // Check all statuses for this cycle
+        const sheetForCycle = sheetsData?.find((s) => s.cycle_id === cycleData.id)
+
+        if (sheetForCycle) {
+          // Redirect non-editable statuses away
+          if (sheetForCycle.status === 'returned') {
+            router.push(`/goals/edit/${sheetForCycle.id}`)
+            return
+          }
+          if (sheetForCycle.status === 'submitted' || sheetForCycle.status === 'approved') {
+            router.push('/dashboard')
+            return
+          }
+          // Draft: load full detail with goals
+          const detail: GoalSheet = await fetchWithAuth(`/goal-sheets/${sheetForCycle.id}`)
           setGoalSheet(detail)
           setGoals(detail.goals || [])
-        } else {
-          // Create new goal sheet
-          const created: GoalSheet = await fetchWithAuth('/goal-sheets', {
-            method: 'POST',
-            body: JSON.stringify({ cycle_id: cycleData.id }),
-          })
-          setGoalSheet(created)
         }
       } catch (err) {
-        if (err instanceof ApiError) {
-          const message = typeof err.message === 'string' ? err.message : 'Failed to initialize goal sheet'
+        if (err instanceof ApiError && err.status !== 404) {
+          const message = typeof err.message === 'string' ? err.message : 'Failed to load cycle'
+          console.error('Load cycle error:', err)
           toast({
             title: 'Error',
             description: message,
@@ -75,10 +80,12 @@ export default function GoalsCreatePage() {
       }
     }
 
-    initializeGoalSheet()
+    loadCycle()
   }, [])
 
-  const totalWeightage = goals.reduce((sum, goal) => sum + (goal.weightage || 0), 0) + (weightage ? Number(weightage) : 0)
+  const totalWeightage = goals
+    .filter((g) => g.id !== editingGoalId)
+    .reduce((sum, goal) => sum + (goal.weightage || 0), 0) + (weightage ? Number(weightage) : 0)
 
   const getWeightageColor = () => {
     if (totalWeightage === 100) return 'text-green-600'
@@ -87,9 +94,7 @@ export default function GoalsCreatePage() {
   }
 
   async function handleAddGoal() {
-    if (!goalSheet) return
-
-    // Validation
+    // Validation - no need to check goalSheet exists yet
     if (!thrustArea.trim()) {
       toast({ title: 'Error', description: 'Thrust Area is required', variant: 'destructive' })
       return
@@ -109,14 +114,22 @@ export default function GoalsCreatePage() {
       return
     }
 
-    if (totalWeightage > 100) {
-      toast({ title: 'Error', description: 'Total weightage cannot exceed 100%', variant: 'destructive' })
-      return
-    }
+    if (editingGoalId) {
+      const otherGoals = goals.filter((g) => g.id !== editingGoalId)
+      if (otherGoals.reduce((sum, g) => sum + g.weightage, 0) + w > 100) {
+        toast({ title: 'Error', description: 'Total weightage cannot exceed 100%', variant: 'destructive' })
+        return
+      }
+    } else {
+      if (totalWeightage > 100) {
+        toast({ title: 'Error', description: 'Total weightage cannot exceed 100%', variant: 'destructive' })
+        return
+      }
 
-    if (goals.length >= 8) {
-      toast({ title: 'Error', description: 'Maximum 8 goals per sheet', variant: 'destructive' })
-      return
+      if (goals.length >= 8) {
+        toast({ title: 'Error', description: 'Maximum 8 goals per sheet', variant: 'destructive' })
+        return
+      }
     }
 
     try {
@@ -142,12 +155,38 @@ export default function GoalsCreatePage() {
         goalData.target_date = targetDate
       }
 
-      const newGoal = await fetchWithAuth(`/goal-sheets/${goalSheet.id}/goals`, {
-        method: 'POST',
-        body: JSON.stringify(goalData),
-      })
-
-      setGoals([...goals, newGoal])
+      if (editingGoalId) {
+        // If editing and sheet exists, update via API
+        if (goalSheet) {
+          await fetchWithAuth(`/goal-sheets/${goalSheet.id}/goals/${editingGoalId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(goalData),
+          })
+        }
+        // Remove old goal from list and add updated goal
+        setGoals(prev => {
+          const filtered = prev.filter(g => g.id !== editingGoalId)
+          return [...filtered, { id: editingGoalId, ...goalData }]
+        })
+        toast({ title: 'Success', description: 'Goal updated' })
+      } else {
+        // If adding and sheet exists, add via API
+        if (goalSheet) {
+          const newGoal = await fetchWithAuth(`/goal-sheets/${goalSheet.id}/goals`, {
+            method: 'POST',
+            body: JSON.stringify(goalData),
+          })
+          setGoals(prev => [...prev, newGoal])
+        } else {
+          // Sheet doesn't exist yet - add to local state only
+          const localGoal = {
+            id: `temp-${Date.now()}`,
+            ...goalData,
+          }
+          setGoals(prev => [...prev, localGoal])
+        }
+        toast({ title: 'Success', description: 'Goal added successfully' })
+      }
 
       // Reset form
       setThrustArea('')
@@ -157,47 +196,54 @@ export default function GoalsCreatePage() {
       setTargetValue('')
       setTargetDate('')
       setWeightage('')
-
-      toast({
-        title: 'Success',
-        description: 'Goal added successfully',
-      })
+      setEditingGoalId(null)
     } catch (err) {
-      if (err instanceof ApiError) {
-        const message = typeof err.message === 'string' ? err.message : 'Failed to add goal'
-        toast({
-          title: 'Error',
-          description: message,
-          variant: 'destructive',
-        })
-      }
+      const message = err instanceof ApiError
+        ? (err?.response?.data?.detail || (typeof err.message === 'string' ? err.message : 'Failed to save goal'))
+        : 'Failed to save goal'
+      toast({
+        title: 'Error',
+        description: message,
+        variant: 'destructive',
+      })
     }
   }
 
+  function handleEditGoal(goal: any) {
+    setThrustArea(goal.thrust_area)
+    setTitle(goal.title)
+    setDescription(goal.description || '')
+    setUomType(goal.uom_type)
+    setTargetValue(goal.target_value?.toString() || '')
+    setTargetDate(goal.target_date || '')
+    setWeightage(goal.weightage.toString())
+    setEditingGoalId(goal.id)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   async function handleDeleteGoal(goalId: string) {
-    try {
-      await fetchWithAuth(`/goal-sheets/${goalSheet?.id}/goals/${goalId}`, {
-        method: 'DELETE',
-      })
-      setGoals(goals.filter((g) => g.id !== goalId))
-      toast({
-        title: 'Success',
-        description: 'Goal deleted successfully',
-      })
-    } catch (err) {
-      if (err instanceof ApiError) {
-        const message = typeof err.message === 'string' ? err.message : 'Failed to delete goal'
-        toast({
-          title: 'Error',
-          description: message,
-          variant: 'destructive',
+    // Update UI immediately (optimistic)
+    setGoals(prev => prev.filter((g) => g.id !== goalId))
+    toast({ title: 'Success', description: 'Goal removed' })
+
+    // Then call API only for persisted (non-temp) goals
+    if (!goalId.startsWith('temp-') && goalSheet) {
+      try {
+        await fetchWithAuth(`/goal-sheets/${goalSheet.id}/goals/${goalId}`, {
+          method: 'DELETE',
         })
+      } catch (err) {
+        // Already removed from UI, just log the error
+        console.error('Delete API error:', err)
       }
     }
   }
 
   async function handleSubmit() {
-    if (!goalSheet) return
+    if (!cycle) {
+      toast({ title: 'Error', description: 'No active cycle found', variant: 'destructive' })
+      return
+    }
 
     if (goals.length === 0) {
       toast({ title: 'Error', description: 'Add at least one goal', variant: 'destructive' })
@@ -212,17 +258,76 @@ export default function GoalsCreatePage() {
 
     setIsSubmitting(true)
     try {
-      await fetchWithAuth(`/goal-sheets/${goalSheet.id}/submit`, {
+      let currentSheetId = goalSheet?.id
+
+      // Step 1: Only create sheet if it doesn't exist yet
+      if (!currentSheetId) {
+        const sheetRes = await fetchWithAuth('/goal-sheets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cycle_id: cycle.id }),
+        })
+        currentSheetId = sheetRes.id
+        setGoalSheet(sheetRes)
+      }
+
+      // Step 2: Only add goals that have temp- ids (not yet saved to DB)
+      for (const goal of goals) {
+        if (goal.id.startsWith('temp-')) {
+          await fetchWithAuth(`/goal-sheets/${currentSheetId}/goals`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              thrust_area: goal.thrust_area,
+              title: goal.title,
+              description: goal.description || '',
+              uom_type: goal.uom_type,
+              target_value: goal.target_value,
+              target_date: goal.target_date,
+              weightage: goal.weightage,
+            }),
+          })
+        }
+      }
+
+      // Step 3: Submit
+      await fetchWithAuth(`/goal-sheets/${currentSheetId}/submit`, {
         method: 'POST',
       })
+
       toast({
         title: 'Success',
-        description: 'Goals submitted for approval',
+        description: 'Goals submitted for approval!',
       })
-      router.push('/dashboard')
+      setTimeout(() => router.push('/dashboard'), 1000)
     } catch (err) {
-      if (err instanceof ApiError) {
-        const message = typeof err.message === 'string' ? err.message : 'Failed to submit goals'
+      // Check if this was a network error — the submit may have still gone through on the backend
+      const isNetworkError = !(err instanceof ApiError)
+      if (isNetworkError) {
+        // Re-verify: fetch the sheet to check if it actually submitted
+        try {
+          const sheets: GoalSheet[] = await fetchWithAuth('/goal-sheets/mine')
+          const maybeSubmitted = sheets?.find(
+            (s) => (s.id === currentSheetId || s.id === goalSheet?.id) && s.status === 'submitted'
+          )
+          if (maybeSubmitted) {
+            toast({
+              title: 'Submitted!',
+              description: 'Your goals were submitted successfully.',
+            })
+            setTimeout(() => router.push('/dashboard'), 1000)
+            return
+          }
+        } catch {
+          // ignore re-verify errors
+        }
+        toast({
+          title: 'Network Error',
+          description: 'Could not reach the server. Please check your connection and try again.',
+          variant: 'destructive',
+        })
+      } else {
+        const message = err instanceof Error ? err.message : 'Submission failed'
         toast({
           title: 'Error',
           description: message,
@@ -245,6 +350,31 @@ export default function GoalsCreatePage() {
     )
   }
 
+  if (!cycle) {
+    return (
+      <RoleGuard allowedRoles={['employee']}>
+        <div className="min-h-screen bg-gray-50">
+          <Navbar />
+          <main className="max-w-4xl mx-auto px-4 py-8">
+            <Card>
+              <CardHeader>
+                <CardTitle>No Active Goal Cycle</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-gray-600">
+                  There is currently no active goal-setting cycle. Please contact your administrator.
+                </p>
+                <Link href="/dashboard">
+                  <Button className="bg-indigo-600 hover:bg-indigo-700">Back to Dashboard</Button>
+                </Link>
+              </CardContent>
+            </Card>
+          </main>
+        </div>
+      </RoleGuard>
+    )
+  }
+
   return (
     <RoleGuard allowedRoles={['employee']}>
       <div className="min-h-screen bg-gray-50">
@@ -253,7 +383,7 @@ export default function GoalsCreatePage() {
         <main className="max-w-4xl mx-auto px-4 py-8">
           <div className="space-y-6">
             <div>
-              <h1 className="text-3xl font-bold">Create Goal Sheet</h1>
+              <h1 className="text-3xl font-bold">{goalSheet ? 'Edit Goal Sheet' : 'Create Goal Sheet'}</h1>
               <p className="text-gray-600 mt-1">
                 {cycle ? `Cycle: ${cycle.name}` : 'No active cycle'}
               </p>
@@ -319,6 +449,7 @@ export default function GoalsCreatePage() {
                         placeholder="e.g., 100000"
                         value={targetValue}
                         onChange={(e) => setTargetValue(e.target.value)}
+                        onWheel={(e) => e.currentTarget.blur()}
                       />
                     </div>
                   )}
@@ -344,6 +475,7 @@ export default function GoalsCreatePage() {
                     placeholder="10-100"
                     value={weightage}
                     onChange={(e) => setWeightage(e.target.value)}
+                    onWheel={(e) => e.currentTarget.blur()}
                   />
                 </div>
 
@@ -352,8 +484,25 @@ export default function GoalsCreatePage() {
                     onClick={handleAddGoal}
                     className="bg-indigo-600 hover:bg-indigo-700"
                   >
-                    Add Goal
+                    {editingGoalId ? 'Update Goal' : 'Add Goal'}
                   </Button>
+                  {editingGoalId && (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setEditingGoalId(null)
+                        setThrustArea('')
+                        setTitle('')
+                        setDescription('')
+                        setUomType('numeric_min')
+                        setTargetValue('')
+                        setTargetDate('')
+                        setWeightage('')
+                      }}
+                    >
+                      Cancel Edit
+                    </Button>
+                  )}
                   <Link href="/dashboard">
                     <Button variant="outline">Cancel</Button>
                   </Link>
@@ -401,7 +550,7 @@ export default function GoalsCreatePage() {
                         <TableHead>Thrust Area</TableHead>
                         <TableHead>Target</TableHead>
                         <TableHead className="text-right">Weightage</TableHead>
-                        <TableHead className="w-12">Action</TableHead>
+                        <TableHead className="w-20">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -413,7 +562,15 @@ export default function GoalsCreatePage() {
                             {goal.target_date ? new Date(goal.target_date).toLocaleDateString() : goal.target_value}
                           </TableCell>
                           <TableCell className="text-right">{goal.weightage}%</TableCell>
-                          <TableCell>
+                          <TableCell className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleEditGoal(goal)}
+                              className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                            >
+                              ✎
+                            </Button>
                             <Button
                               size="sm"
                               variant="ghost"
@@ -438,7 +595,7 @@ export default function GoalsCreatePage() {
               </Link>
               <Button
                 onClick={handleSubmit}
-                disabled={goals.length === 0 || totalWeightage !== 100 || isSubmitting}
+                disabled={goals.length === 0 || totalWeightage !== 100 || isSubmitting || !!editingGoalId}
                 className="bg-green-600 hover:bg-green-700 disabled:bg-gray-300"
               >
                 {isSubmitting ? 'Submitting...' : 'Submit for Approval'}

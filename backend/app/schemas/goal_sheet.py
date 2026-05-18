@@ -24,7 +24,7 @@ class GoalResponseForSheet(BaseModel):
     title: str
     description: str | None
     uom_type: str
-    target_value: float
+    target_value: float | None = None
     target_date: datetime | None
     weightage: float
     is_shared: bool

@@ -31,6 +31,10 @@ export default function AdminCyclesPage() {
   const [opensAt, setOpensAt] = useState('')
   const [closesAt, setClosesAt] = useState('')
 
+  // Phase update dialog state
+  const [editingCycleId, setEditingCycleId] = useState<string | null>(null)
+  const [newPhase, setNewPhase] = useState('')
+
   useEffect(() => {
     async function loadCycles() {
       try {
@@ -40,12 +44,7 @@ export default function AdminCyclesPage() {
         setActiveCycle(active || null)
       } catch (err) {
         if (err instanceof ApiError) {
-          let message = 'Failed to load cycles'
-          if (typeof err.message === 'string') {
-            message = err.message
-          } else if (err.message?.message) {
-            message = err.message.message
-          }
+          const message = typeof err.message === 'string' ? err.message : 'Failed to load cycles'
           toast({
             title: 'Error',
             description: message,
@@ -58,7 +57,7 @@ export default function AdminCyclesPage() {
     }
 
     loadCycles()
-  }, [toast])
+  }, [])
 
   async function handleCreateCycle() {
     if (!name.trim() || !opensAt || !closesAt) {
@@ -71,8 +70,9 @@ export default function AdminCyclesPage() {
       const cycleData: CreateGoalCycleInput = {
         name,
         phase,
-        opens_at: opensAt,
-        closes_at: closesAt,
+        // Append seconds+Z so Pydantic receives a valid UTC ISO 8601 string
+        opens_at: opensAt.length === 16 ? `${opensAt}:00.000Z` : opensAt,
+        closes_at: closesAt.length === 16 ? `${closesAt}:00.000Z` : closesAt,
       }
 
       const newCycle: GoalCycle = await fetchWithAuth('/cycles', {
@@ -95,12 +95,8 @@ export default function AdminCyclesPage() {
       })
     } catch (err) {
       let message = 'Failed to create cycle'
-      if (err instanceof ApiError) {
-        if (typeof err.message === 'string') {
-          message = err.message
-        } else if (err.message?.message) {
-          message = err.message.message
-        }
+      if (err instanceof ApiError && typeof err.message === 'string') {
+        message = err.message
       }
       toast({
         title: 'Error',
@@ -118,6 +114,41 @@ export default function AdminCyclesPage() {
     q2: 'Q2 Review',
     q3: 'Q3 Review',
     q4: 'Q4 Review',
+  }
+
+  async function handleUpdatePhase() {
+    if (!editingCycleId || !newPhase) {
+      toast({ title: 'Error', description: 'Please select a phase', variant: 'destructive' })
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      await fetchWithAuth(`/cycles/${editingCycleId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ phase: newPhase }),
+      })
+
+      setCycles(cycles.map((c) => c.id === editingCycleId ? { ...c, phase: newPhase } : c))
+      setEditingCycleId(null)
+      setNewPhase('')
+
+      toast({
+        title: 'Success',
+        description: 'Cycle phase updated',
+      })
+    } catch (err) {
+      const message = err instanceof ApiError
+        ? (typeof err.message === 'string' ? err.message : 'Failed to update cycle')
+        : 'Failed to update cycle'
+      toast({
+        title: 'Error',
+        description: message,
+        variant: 'destructive',
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -145,79 +176,80 @@ export default function AdminCyclesPage() {
                     <DialogTrigger asChild>
                       <Button className="bg-indigo-600 hover:bg-indigo-700">+ Create Cycle</Button>
                     </DialogTrigger>
-                  <DialogContent className="max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>Create New Goal Cycle</DialogTitle>
-                      <DialogDescription>
-                        Set up a new goal-setting or review cycle
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <Label>Cycle Name *</Label>
-                        <Input
-                          placeholder="e.g., FY2024 Q1"
-                          value={name}
-                          onChange={(e) => setName(e.target.value)}
-                          disabled={isSubmitting}
-                        />
-                      </div>
+                    <DialogContent className="max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>Create New Goal Cycle</DialogTitle>
+                        <DialogDescription>
+                          Set up a new goal-setting or review cycle
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label>Cycle Name *</Label>
+                          <Input
+                            placeholder="e.g., FY2024 Q1"
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            disabled={isSubmitting}
+                          />
+                        </div>
 
-                      <div className="space-y-2">
-                        <Label>Phase *</Label>
-                        <Select value={phase} onValueChange={setPhase}>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="goal_setting">Goal Setting</SelectItem>
-                            <SelectItem value="q1">Q1 Review</SelectItem>
-                            <SelectItem value="q2">Q2 Review</SelectItem>
-                            <SelectItem value="q3">Q3 Review</SelectItem>
-                            <SelectItem value="q4">Q4 Review</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
+                        <div className="space-y-2">
+                          <Label>Phase *</Label>
+                          <Select value={phase} onValueChange={setPhase}>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="goal_setting">Goal Setting</SelectItem>
+                              <SelectItem value="q1">Q1 Review</SelectItem>
+                              <SelectItem value="q2">Q2 Review</SelectItem>
+                              <SelectItem value="q3">Q3 Review</SelectItem>
+                              <SelectItem value="q4">Q4 Review</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
 
-                      <div className="space-y-2">
-                        <Label>Opens At *</Label>
-                        <Input
-                          type="datetime-local"
-                          value={opensAt}
-                          onChange={(e) => setOpensAt(e.target.value)}
-                          disabled={isSubmitting}
-                        />
-                      </div>
+                        <div className="space-y-2">
+                          <Label>Opens At *</Label>
+                          <Input
+                            type="datetime-local"
+                            value={opensAt}
+                            onChange={(e) => setOpensAt(e.target.value)}
+                            disabled={isSubmitting}
+                          />
+                        </div>
 
-                      <div className="space-y-2">
-                        <Label>Closes At *</Label>
-                        <Input
-                          type="datetime-local"
-                          value={closesAt}
-                          onChange={(e) => setClosesAt(e.target.value)}
-                          disabled={isSubmitting}
-                        />
-                      </div>
+                        <div className="space-y-2">
+                          <Label>Closes At *</Label>
+                          <Input
+                            type="datetime-local"
+                            value={closesAt}
+                            onChange={(e) => setClosesAt(e.target.value)}
+                            disabled={isSubmitting}
+                          />
+                        </div>
 
-                      <div className="flex gap-2 justify-end pt-4">
-                        <Button
-                          variant="outline"
-                          onClick={() => setIsDialogOpen(false)}
-                          disabled={isSubmitting}
-                        >
-                          Cancel
-                        </Button>
-                        <Button
-                          className="bg-indigo-600 hover:bg-indigo-700"
-                          onClick={handleCreateCycle}
-                          disabled={isSubmitting}
-                        >
-                          {isSubmitting ? 'Creating...' : 'Create'}
-                        </Button>
+                        <div className="flex gap-2 justify-end pt-4">
+                          <Button
+                            variant="outline"
+                            onClick={() => setIsDialogOpen(false)}
+                            disabled={isSubmitting}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            className="bg-indigo-600 hover:bg-indigo-700"
+                            onClick={handleCreateCycle}
+                            disabled={isSubmitting}
+                          >
+                            {isSubmitting ? 'Creating...' : 'Create'}
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
+                    </DialogContent>
+                  </Dialog>
+                </div>
               </div>
 
               {/* Active Cycle Card */}
@@ -270,6 +302,7 @@ export default function AdminCyclesPage() {
                         <TableHead>Opens At</TableHead>
                         <TableHead>Closes At</TableHead>
                         <TableHead className="text-center">Status</TableHead>
+                        <TableHead className="text-center">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -298,6 +331,18 @@ export default function AdminCyclesPage() {
                               <Badge className="bg-gray-100 text-gray-800">Inactive</Badge>
                             )}
                           </TableCell>
+                          <TableCell className="text-center">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setEditingCycleId(cycle.id)
+                                setNewPhase(cycle.phase)
+                              }}
+                            >
+                              Update Phase
+                            </Button>
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -307,7 +352,52 @@ export default function AdminCyclesPage() {
             </div>
           )}
         </main>
+
+        {/* Update Phase Dialog */}
+        <Dialog open={!!editingCycleId} onOpenChange={(open) => !open && setEditingCycleId(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Update Cycle Phase</DialogTitle>
+              <DialogDescription>Select a new phase for this cycle</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Phase</Label>
+                <Select value={newPhase} onValueChange={setNewPhase}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="goal_setting">Goal Setting</SelectItem>
+                    <SelectItem value="q1">Q1 Review</SelectItem>
+                    <SelectItem value="q2">Q2 Review</SelectItem>
+                    <SelectItem value="q3">Q3 Review</SelectItem>
+                    <SelectItem value="q4">Q4 Review</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex gap-2 justify-end pt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => setEditingCycleId(null)}
+                  disabled={isSubmitting}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="bg-indigo-600 hover:bg-indigo-700"
+                  onClick={handleUpdatePhase}
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? 'Updating...' : 'Update'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </RoleGuard>
   )
 }
+

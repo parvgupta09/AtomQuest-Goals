@@ -1,12 +1,14 @@
 from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+import logging
 
 from app.core.database import get_db
 from app.core.security import get_current_user, require_role
 from app.services.achievement_service import AchievementService
 from app.schemas.achievement import AchievementCreate, AchievementResponse
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/achievements")
 
 
@@ -17,6 +19,7 @@ async def log_achievement(
     db: AsyncSession = Depends(get_db)
 ):
     """Log achievement for a goal in current phase (Employee only)."""
+    logger.info(f"Achievement request from {current_user.id}: {achievement_data}")
     achievement = await AchievementService.log_achievement(db, achievement_data, current_user.id)
     return achievement
 

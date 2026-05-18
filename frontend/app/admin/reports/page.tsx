@@ -32,15 +32,12 @@ export default function AdminReportsPage() {
     async function loadReport() {
       try {
         const data: AchievementReport[] = await fetchWithAuth('/reports/achievement')
-        setReport(data)
+        setReport(data || [])
       } catch (err) {
         if (err instanceof ApiError) {
-          let message = 'Failed to load report'
-          if (typeof err.message === 'string') {
-            message = err.message
-          } else if (err.message?.message) {
-            message = err.message.message
-          }
+          const message = 
+            err?.response?.data?.detail ||
+            (typeof err.message === 'string' ? err.message : 'Failed to load report')
           toast({
             title: 'Error',
             description: message,
@@ -58,10 +55,18 @@ export default function AdminReportsPage() {
   async function handleExportCSV() {
     setIsExporting(true)
     try {
-      const data = await fetchWithAuth('/reports/achievement?export=csv')
+      const headers = ['Employee', 'Goal', 'Target', 'Actual', 'Progress %', 'Status']
+      const rows = (report || []).map((item) => [
+        item.employee_name,
+        item.goal_title,
+        item.target_value,
+        item.actual_value,
+        (item.progress_score * 100).toFixed(0),
+        item.status,
+      ])
 
-      // Create blob and download
-      const blob = new Blob([data], { type: 'text/csv' })
+      const csv = [headers, ...rows].map((r) => r.map((cell) => `"${cell}"`).join(',')).join('\n')
+      const blob = new Blob([csv], { type: 'text/csv' })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -76,13 +81,17 @@ export default function AdminReportsPage() {
         description: 'Report exported successfully',
       })
     } catch (err) {
+      let message = 'Failed to export report'
       if (err instanceof ApiError) {
-        toast({
-          title: 'Error',
-          description: err.message,
-          variant: 'destructive',
-        })
+        message =
+          err?.response?.data?.detail ||
+          (typeof err.message === 'string' ? err.message : 'Failed to export report')
       }
+      toast({
+        title: 'Error',
+        description: message,
+        variant: 'destructive',
+      })
     } finally {
       setIsExporting(false)
     }
@@ -148,24 +157,24 @@ export default function AdminReportsPage() {
                   <div className="grid grid-cols-4 gap-4">
                     <div>
                       <p className="text-xs text-gray-600 uppercase">Total Goals</p>
-                      <p className="text-2xl font-bold">{report.length}</p>
+                      <p className="text-2xl font-bold">{report?.length || 0}</p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-600 uppercase">Completed</p>
                       <p className="text-2xl font-bold text-green-600">
-                        {report.filter((r) => r.status === 'completed').length}
+                        {(report?.filter((r) => r.status === 'completed')?.length || 0)}
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-600 uppercase">On Track</p>
                       <p className="text-2xl font-bold text-amber-600">
-                        {report.filter((r) => r.status === 'on_track').length}
+                        {(report?.filter((r) => r.status === 'on_track')?.length || 0)}
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-600 uppercase">Avg Progress</p>
                       <p className="text-2xl font-bold">
-                        {((report.reduce((sum, r) => sum + r.progress_score, 0) / report.length) * 100).toFixed(0)}%
+                        {(report && report.length > 0 ? ((report.reduce((sum, r) => sum + r.progress_score, 0) / report.length) * 100).toFixed(0) : 0)}%
                       </p>
                     </div>
                   </div>
@@ -179,7 +188,7 @@ export default function AdminReportsPage() {
                   <CardDescription>Individual goal performance breakdown</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  {report.length === 0 ? (
+                  {(report?.length || 0) === 0 ? (
                     <div className="text-center py-8">
                       <p className="text-gray-500">No achievement data available</p>
                     </div>
@@ -197,7 +206,7 @@ export default function AdminReportsPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {report.map((item, idx) => (
+                          {(report || []).map((item, idx) => (
                             <TableRow key={idx}>
                               <TableCell className="font-medium">{item.employee_name}</TableCell>
                               <TableCell className="max-w-xs">{item.goal_title}</TableCell>

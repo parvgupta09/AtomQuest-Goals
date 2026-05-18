@@ -8,7 +8,7 @@ class GoalCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
     description: str | None = Field(None, max_length=2000)
     uom_type: UOMType
-    target_value: float
+    target_value: float | None = None
     target_date: date | None = None
     weightage: float
 
@@ -50,7 +50,7 @@ class GoalResponse(BaseModel):
     title: str
     description: str | None
     uom_type: UOMType
-    target_value: float
+    target_value: float | None = None
     target_date: date | None
     weightage: float
     is_shared: bool
