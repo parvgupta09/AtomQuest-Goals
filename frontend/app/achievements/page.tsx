@@ -37,6 +37,10 @@ export default function AchievementsPage() {
   const [achievementValues, setAchievementValues] = useState<Record<string, string>>({})
   const [achievementStatuses, setAchievementStatuses] = useState<Record<string, string>>({})
   const [selectedPhase, setSelectedPhase] = useState('q1')
+  
+  // Separate state for timeline goals (date + completed checkbox)
+  const [timelineValues, setTimelineValues] = useState<Record<string, { date: string; completed: boolean }>>({})
+  const [zeroValues, setZeroValues] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     async function loadData() {
@@ -106,27 +110,48 @@ export default function AchievementsPage() {
   }, [])
 
   async function handleSaveAchievement(goal: GoalWithAchievement) {
-    const value = achievementValues[goal.id]
     const status = achievementStatuses[goal.id]
-
-    if (!value && status === 'not_started') {
-      toast({ title: 'Error', description: 'Enter actual value or change status', variant: 'destructive' })
-      return
-    }
 
     if (!cycle) {
       toast({ title: 'Error', description: 'Unable to determine current cycle', variant: 'destructive' })
       return
     }
 
+    // Determine actual_value and actual_date based on UOM type
+    let actual_value: number = 0
+    let actual_date: string = new Date().toISOString().split('T')[0]
+
+    if (goal.uom_type === 'timeline') {
+      // For timeline goals: completed checkbox determines actual_value
+      const timelineData = timelineValues[goal.id]
+      if (!timelineData || !timelineData.date) {
+        toast({ title: 'Error', description: 'Please select a completion date', variant: 'destructive' })
+        return
+      }
+      actual_value = timelineData.completed ? 1 : 0
+      actual_date = timelineData.date
+    } else if (goal.uom_type === 'zero') {
+      // For zero goals: checkbox value (0 for success, 1 for failure)
+      actual_value = zeroValues[goal.id] ? 0 : 1
+      actual_date = new Date().toISOString().split('T')[0]
+    } else {
+      // For numeric goals
+      const value = achievementValues[goal.id]
+      if (!value && status === 'not_started') {
+        toast({ title: 'Error', description: 'Enter actual value or change status', variant: 'destructive' })
+        return
+      }
+      actual_value = value ? Number(value) : 0
+      actual_date = new Date().toISOString().split('T')[0]
+    }
+
     setIsSaving(goal.id)
     try {
-      const today = new Date().toISOString().split('T')[0]
       const achievementData = {
         goal_id: goal.id,
         cycle_phase: selectedPhase,
-        actual_value: value ? Number(value) : 0,
-        actual_date: today,
+        actual_value,
+        actual_date,
         status,
       }
 
@@ -321,39 +346,52 @@ export default function AchievementsPage() {
                     {/* Achievement Form */}
                     <div className="space-y-4">
                       {goal.uom_type === 'timeline' ? (
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label>Completion Date</Label>
-                            <Input
-                              type="date"
-                              value={achievementValues[goal.id] ? new Date(goal.target_date || '').toISOString().split('T')[0] : ''}
-                              onChange={(e) => {
-                                setAchievementValues({
-                                  ...achievementValues,
-                                  [goal.id]: e.target.value || '',
-                                })
-                              }}
-                              disabled={isSaving === goal.id}
-                            />
-                          </div>
+                        <div className="space-y-4">
+                          {/* Completed? checkbox */}
                           <div className="space-y-2">
                             <Label>Completed?</Label>
                             <div className="flex items-center h-10 border rounded-md px-3">
                               <input
                                 type="checkbox"
-                                checked={achievementValues[goal.id] === '1'}
+                                checked={timelineValues[goal.id]?.completed || false}
                                 onChange={(e) =>
-                                  setAchievementValues({
-                                    ...achievementValues,
-                                    [goal.id]: e.target.checked ? '1' : '0',
+                                  setTimelineValues({
+                                    ...timelineValues,
+                                    [goal.id]: {
+                                      ...timelineValues[goal.id],
+                                      completed: e.target.checked,
+                                    },
                                   })
                                 }
                                 disabled={isSaving === goal.id}
                                 className="cursor-pointer"
                               />
-                              <span className="ml-2 text-sm">{achievementValues[goal.id] === '1' ? 'Yes' : 'No'}</span>
+                              <span className="ml-2 text-sm">
+                                {timelineValues[goal.id]?.completed ? 'Yes' : 'No'}
+                              </span>
                             </div>
                           </div>
+                          
+                          {/* Completion Date - only show if Completed = Yes */}
+                          {timelineValues[goal.id]?.completed && (
+                            <div className="space-y-2">
+                              <Label>Completion Date</Label>
+                              <Input
+                                type="date"
+                                value={timelineValues[goal.id]?.date || ''}
+                                onChange={(e) => {
+                                  setTimelineValues({
+                                    ...timelineValues,
+                                    [goal.id]: {
+                                      ...timelineValues[goal.id],
+                                      date: e.target.value,
+                                    },
+                                  })
+                                }}
+                                disabled={isSaving === goal.id}
+                              />
+                            </div>
+                          )}
                         </div>
                       ) : goal.uom_type === 'zero' ? (
                         <div className="grid grid-cols-2 gap-4">
@@ -362,17 +400,19 @@ export default function AchievementsPage() {
                             <div className="flex items-center h-10 border rounded-md px-3">
                               <input
                                 type="checkbox"
-                                checked={achievementValues[goal.id] === '0'}
+                                checked={zeroValues[goal.id] || false}
                                 onChange={(e) =>
-                                  setAchievementValues({
-                                    ...achievementValues,
-                                    [goal.id]: e.target.checked ? '0' : '1',
+                                  setZeroValues({
+                                    ...zeroValues,
+                                    [goal.id]: e.target.checked,
                                   })
                                 }
                                 disabled={isSaving === goal.id}
                                 className="cursor-pointer"
                               />
-                              <span className="ml-2 text-sm">{achievementValues[goal.id] === '0' ? 'Yes (0 incidents)' : 'No'}</span>
+                              <span className="ml-2 text-sm">
+                                {zeroValues[goal.id] ? 'Yes (0 incidents)' : 'No'}
+                              </span>
                             </div>
                           </div>
 

@@ -37,17 +37,10 @@ class AchievementService:
                 return 1.0 if actual_value == 0 else 0.0
             score = actual_value / target_value
         elif uom_type == UOMType.TIMELINE:
-            # Date-based: 1.0 if on or before target, else partial
-            if actual_date and target_date:
-                if actual_date <= target_date:
-                    score = 1.0
-                else:
-                    # Partial score based on delay
-                    delay_days = (actual_date - target_date).days
-                    # Deduct 0.1 per week delay, minimum 0.0
-                    score = max(0.0, 1.0 - (delay_days / 7.0 * 0.1))
-            else:
-                score = 0.0
+            # Timeline goals are binary: either completed (1.0) or not (0.0)
+            # actual_value = 1 means completed (progress 100%)
+            # actual_value = 0 means not completed (progress 0%)
+            score = 1.0 if actual_value >= 1 else 0.0
         elif uom_type == UOMType.ZERO:
             # Zero = success (e.g., Safety incidents)
             score = 1.0 if actual_value == 0 else 0.0
@@ -269,17 +262,24 @@ class AchievementService:
         """Sync achievement to other employees who have the same shared goal."""
         # Find all goals with same title, thrust_area, target_value, and shared_by
         # (they're the "same" shared goal pushed to different employees)
-        stmt = select(Goal).where(
+        # Also ensure they're in the SAME cycle
+        stmt = select(Goal).join(
+            GoalSheet, Goal.goal_sheet_id == GoalSheet.id
+        ).where(
             (Goal.title == goal.title) &
             (Goal.thrust_area == goal.thrust_area) &
             (Goal.target_value == goal.target_value) &
             (Goal.shared_by == goal.shared_by) &
             (Goal.is_shared == True) &
-            (Goal.id != goal.id)  # Exclude the current goal
+            (Goal.id != goal.id) &
+            (GoalSheet.cycle_id == goal.goal_sheet.cycle_id)  # Same cycle!
         ).options(selectinload(Goal.goal_sheet))
         
         result = await db.execute(stmt)
         other_shared_goals = result.scalars().all()
+        
+        # Log sync action for debugging
+        print(f"[SYNC] Found {len(other_shared_goals)} employees to sync achievement for '{goal.title}' (actual_value={achievement_data.actual_value})")
         
         # For each other employee's shared goal, create/update their achievement
         for other_goal in other_shared_goals:
@@ -293,11 +293,13 @@ class AchievementService:
             
             if existing:
                 # Update existing
+                old_value = existing.actual_value
                 existing.actual_value = achievement_data.actual_value
                 existing.actual_date = achievement_data.actual_date
                 existing.status = achievement_data.status
                 existing.progress_score = progress_score
                 existing.updated_at = datetime.now(timezone.utc)
+                print(f"[SYNC] Updated achievement for goal {other_goal.id}: {old_value} -> {achievement_data.actual_value}")
             else:
                 # Create new
                 new_achievement = Achievement(
@@ -311,5 +313,7 @@ class AchievementService:
                     updated_at=datetime.now(timezone.utc),
                 )
                 db.add(new_achievement)
+                print(f"[SYNC] Created new achievement for goal {other_goal.id} with value {achievement_data.actual_value}")
         
         await db.commit()
+        print(f"[SYNC] Sync complete for goal '{goal.title}'")
