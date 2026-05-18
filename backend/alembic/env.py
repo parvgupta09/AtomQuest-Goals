@@ -16,7 +16,7 @@ config = context.config
 from app.models import Base, User, UserRole, GoalCycle, CyclePhase, GoalSheet, GoalSheetStatus, Goal, UOMType, Achievement, AchievementStatus, CheckinComment, AuditLog
 
 # Set sqlalchemy.url from environment
-database_url = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/goals_portal")
+database_url = os.getenv("DATABASE_URL")
 config.set_main_option("sqlalchemy.url", database_url)
 
 # Configure logging
@@ -42,7 +42,7 @@ async def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
     # Create async engine
     configuration = config.get_section(config.config_ini_section)
-    configuration["sqlalchemy.url"] = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/goals_portal")
+    configuration["sqlalchemy.url"] = os.getenv("DATABASE_URL")
 
     connectable = create_async_engine(
         configuration["sqlalchemy.url"],
