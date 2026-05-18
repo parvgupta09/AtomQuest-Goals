@@ -164,10 +164,6 @@ export default function ProfilePage() {
                       <p className="text-xs text-gray-500 uppercase font-medium mb-1">Department</p>
                       <p className="font-medium">{profile.department || '—'}</p>
                     </div>
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase font-medium mb-1">User ID</p>
-                      <p className="font-mono text-sm text-gray-500">{profile.id}</p>
-                    </div>
                   </div>
                 </>
               ) : (

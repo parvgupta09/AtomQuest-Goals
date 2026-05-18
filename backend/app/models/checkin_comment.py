@@ -11,7 +11,7 @@ class CheckinComment(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     goal_sheet_id = Column(UUID(as_uuid=True), ForeignKey("goal_sheets.id"), nullable=False)
     manager_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    phase = Column(String(10), nullable=False)  # q1, q2, q3, q4
+    phase = Column(String(20), nullable=False)  # goal_setting, q1, q2, q3, q4
     comment = Column(String(2000), nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 

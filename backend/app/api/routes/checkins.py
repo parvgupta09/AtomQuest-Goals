@@ -7,7 +7,7 @@ from app.core.security import get_current_user, require_role
 from app.services.checkin_service import CheckinService
 from app.schemas.checkin import CheckinCreate, CheckinResponse
 
-router = APIRouter()
+router = APIRouter(prefix="/checkins")
 
 
 @router.post("", response_model=CheckinResponse, status_code=201)
